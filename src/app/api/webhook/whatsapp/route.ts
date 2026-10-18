@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { parseIndonesianAmount, formatRupiah, getNowFormatted } from '@/lib/utils';
 import { addTransaction, getTransactions } from '@/lib/server-store';
+import { getOrCreateUser } from '@/lib/db';
 
 // Helper to determine category based on keywords in description
 function detectCategory(text: string): string {
@@ -147,6 +148,13 @@ export async function POST(req: Request) {
         .trim();
       if (!desc) desc = cleanMsg;
 
+      // Link to WhatsApp user account in Neon DB
+      const cleanPhone = sender.replace(/\D/g, '');
+      const user = await getOrCreateUser(
+        `${cleanPhone}@whatsapp.finra.id`,
+        name || `Pengguna WhatsApp (${cleanPhone.slice(-4)})`
+      );
+
       // Add to store
       const newTx = await addTransaction({
         date: getNowFormatted(),
@@ -163,6 +171,7 @@ export async function POST(req: Request) {
         raw_input: cleanMsg,
         attachment_url: null,
         notes: `Recorded via WA (${sender})`,
+        user_id: user?.id || null,
       });
 
       const icon = type === 'income' ? '🟢 *Pemasukan Dicatat!*' : '🔴 *Pengeluaran Dicatat!*';

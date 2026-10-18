@@ -22,6 +22,7 @@ export interface Transaction {
   raw_input: string | null;
   attachment_url: string | null;
   notes: string | null;
+  user_id?: string | null;
 }
 
 export interface Category {

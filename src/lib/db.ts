@@ -70,8 +70,10 @@ async function ensureTableExists(sql: NeonQueryFunction<false, false>) {
         raw_input TEXT,
         attachment_url TEXT,
         notes TEXT,
+        user_id TEXT,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       );
+      ALTER TABLE transactions ADD COLUMN IF NOT EXISTS user_id TEXT;
     `;
 
     // 2. Users table
@@ -316,20 +318,31 @@ export async function getOrCreateUser(email: string, initialName?: string): Prom
 // TRANSACTIONS QUERIES
 // ============================================================================
 
-export async function getTransactions(): Promise<Transaction[]> {
+export async function getTransactions(userId?: string): Promise<Transaction[]> {
   const sql = getNeonSql();
   if (sql) {
     try {
       await ensureTableExists(sql);
-      const rows = await sql`
-        SELECT 
-          id, type, CAST(amount AS DOUBLE PRECISION) as amount, currency, 
-          date, merchant, description, category, subcategory, 
-          payment_method, source, CAST(confidence AS DOUBLE PRECISION) as confidence, 
-          raw_input, attachment_url, notes
-        FROM transactions
-        ORDER BY date DESC
-      `;
+      const rows = userId
+        ? await sql`
+            SELECT 
+              id, type, CAST(amount AS DOUBLE PRECISION) as amount, currency, 
+              date, merchant, description, category, subcategory, 
+              payment_method, source, CAST(confidence AS DOUBLE PRECISION) as confidence, 
+              raw_input, attachment_url, notes, user_id
+            FROM transactions
+            WHERE user_id = ${userId} OR user_id IS NULL
+            ORDER BY date DESC
+          `
+        : await sql`
+            SELECT 
+              id, type, CAST(amount AS DOUBLE PRECISION) as amount, currency, 
+              date, merchant, description, category, subcategory, 
+              payment_method, source, CAST(confidence AS DOUBLE PRECISION) as confidence, 
+              raw_input, attachment_url, notes, user_id
+            FROM transactions
+            ORDER BY date DESC
+          `;
 
       if (rows && rows.length > 0) {
         return rows as unknown as Transaction[];
@@ -362,13 +375,14 @@ export async function addTransaction(tx: Omit<Transaction, 'id'>): Promise<Trans
         INSERT INTO transactions (
           id, type, amount, currency, date, merchant, description, 
           category, subcategory, payment_method, source, confidence, 
-          raw_input, attachment_url, notes
+          raw_input, attachment_url, notes, user_id
         ) VALUES (
           ${newTx.id}, ${newTx.type}, ${newTx.amount}, ${newTx.currency}, 
           ${newTx.date}, ${newTx.merchant || null}, ${newTx.description}, 
           ${newTx.category}, ${newTx.subcategory || null}, ${newTx.payment_method || null}, 
           ${newTx.source || 'text'}, ${newTx.confidence || 1.0}, 
-          ${newTx.raw_input || null}, ${newTx.attachment_url || null}, ${newTx.notes || null}
+          ${newTx.raw_input || null}, ${newTx.attachment_url || null}, ${newTx.notes || null},
+          ${newTx.user_id || null}
         )
       `;
     } catch (err: any) {
@@ -377,6 +391,37 @@ export async function addTransaction(tx: Omit<Transaction, 'id'>): Promise<Trans
   }
 
   return newTx;
+}
+
+export async function updateTransaction(tx: Transaction): Promise<boolean> {
+  const sql = getNeonSql();
+  if (sql) {
+    try {
+      await ensureTableExists(sql);
+      await sql`
+        UPDATE transactions
+        SET 
+          type = ${tx.type},
+          amount = ${tx.amount},
+          currency = ${tx.currency || 'IDR'},
+          date = ${tx.date},
+          merchant = ${tx.merchant || null},
+          description = ${tx.description},
+          category = ${tx.category},
+          subcategory = ${tx.subcategory || null},
+          payment_method = ${tx.payment_method || null},
+          notes = ${tx.notes || null}
+        WHERE id = ${tx.id}
+      `;
+    } catch (err: any) {
+      console.error('[Neon DB] Update error:', err?.message);
+    }
+  }
+
+  if (global.__GLOBAL_TRANSACTIONS__) {
+    global.__GLOBAL_TRANSACTIONS__ = global.__GLOBAL_TRANSACTIONS__.map(t => t.id === tx.id ? tx : t);
+  }
+  return true;
 }
 
 export async function deleteTransaction(id: string): Promise<boolean> {
@@ -394,4 +439,25 @@ export async function deleteTransaction(id: string): Promise<boolean> {
   const initialLen = global.__GLOBAL_TRANSACTIONS__.length;
   global.__GLOBAL_TRANSACTIONS__ = global.__GLOBAL_TRANSACTIONS__.filter(t => t.id !== id);
   return global.__GLOBAL_TRANSACTIONS__.length < initialLen;
+}
+
+export async function clearAllTransactions(userId?: string): Promise<boolean> {
+  const sql = getNeonSql();
+  if (sql) {
+    try {
+      await ensureTableExists(sql);
+      if (userId) {
+        await sql`DELETE FROM transactions WHERE user_id = ${userId}`;
+      } else {
+        await sql`DELETE FROM transactions`;
+      }
+    } catch (err: any) {
+      console.error('[Neon DB] Clear all error:', err?.message);
+    }
+  }
+
+  if (global.__GLOBAL_TRANSACTIONS__) {
+    global.__GLOBAL_TRANSACTIONS__ = [];
+  }
+  return true;
 }

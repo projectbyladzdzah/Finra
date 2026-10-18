@@ -5,7 +5,11 @@ import { formatRupiah, cn } from '@/lib/utils';
 import { ShieldCheck, Link2, Trash2, Plus, RefreshCw } from 'lucide-react';
 
 export default function SettingsPanel() {
-  const { darkMode, categories, setCategories, isAccountLinked, setIsAccountLinked, otpCode, setOtpCode, setTransactions, setMerchantRules, exportToCSV } = useApp();
+  const {
+    darkMode, categories, setCategories, isAccountLinked,
+    setIsAccountLinked, otpCode, setOtpCode, setMerchantRules,
+    exportToCSV, handleClearAllTransactions
+  } = useApp();
   const [newCatName, setNewCatName] = useState('');
   const [newCatIcon, setNewCatIcon] = useState('✨');
   const [newCatType, setNewCatType] = useState<'expense' | 'income'>('expense');
@@ -96,9 +100,14 @@ export default function SettingsPanel() {
             className="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition">
             📥 Export Ledger ke CSV
           </button>
-          <button onClick={() => { if (window.confirm('Hapus semua data transaksi dan aturan? Ini tidak dapat dibatalkan.')) { setTransactions(() => []); setMerchantRules(() => []); } }}
+          <button onClick={async () => {
+            if (window.confirm('Hapus semua data transaksi dan aturan? Ini tidak dapat dibatalkan.')) {
+              await handleClearAllTransactions();
+              setMerchantRules(() => []);
+            }
+          }}
             className={cn('w-full py-2.5 rounded-xl text-xs font-semibold border transition', darkMode ? 'bg-rose-500/10 border-rose-500/20 text-rose-400 hover:bg-rose-500/20' : 'bg-rose-50 border-rose-200 text-rose-600 hover:bg-rose-100')}>
-            🗑️ Hapus Semua Data (GDPR Purge)
+            🗑️ Hapus Semua Data (Neon DB Purge)
           </button>
         </div>
 

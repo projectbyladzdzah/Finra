@@ -56,7 +56,9 @@ interface AppContextType {
   handleRealImageUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
   handleDraftAction: (msgId: string, action: 'SAVE' | 'CANCEL' | 'EDIT') => void;
   exportToCSV: () => void;
-  commitTransactionEdit: (tx: Transaction) => void;
+  commitTransactionEdit: (tx: Transaction) => Promise<void>;
+  handleDeleteTransaction: (id: string) => Promise<void>;
+  handleClearAllTransactions: () => Promise<void>;
   chatInput: string;
   setChatInput: (v: string) => void;
   fileInputRef: React.RefObject<HTMLInputElement | null>;
@@ -128,6 +130,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   // Sync transactions with backend store & auto-poll updates from WhatsApp webhook
   useEffect(() => {
+    if (!currentUser) return;
+
     let isMounted = true;
     const syncTransactions = async () => {
       try {
@@ -149,7 +153,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       isMounted = false;
       clearInterval(interval);
     };
-  }, []);
+  }, [currentUser]);
 
   // ── DERIVED METRICS ────────────────────────────────────────────────────────
   const metrics = useMemo<AppMetrics>(() => {
@@ -198,6 +202,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
       ...item, id: `tx-${Date.now()}-${i}`, source, raw_input: rawInput, attachment_url: attachmentUrl
     })) as Transaction[];
     setTransactions(prev => [...newRecords, ...prev]);
+
+    // Persist to Neon Postgres in background
+    newRecords.forEach(tx => {
+      fetch('/api/transactions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(tx),
+      }).catch(err => console.error('[AppContext] Failed to persist transaction to Neon:', err));
+    });
 
     const alerts: string[] = [];
     newRecords.forEach(tx => {
@@ -432,9 +445,40 @@ export function AppProvider({ children }: { children: ReactNode }) {
     document.body.appendChild(link); link.click(); document.body.removeChild(link);
   }, [transactions]);
 
-  const commitTransactionEdit = useCallback((tx: Transaction) => {
+  const commitTransactionEdit = useCallback(async (tx: Transaction) => {
     setTransactions(prev => prev.map(item => item.id === tx.id ? tx : item));
     setEditingTxModal(null);
+    try {
+      await fetch('/api/transactions', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(tx),
+      });
+    } catch (err) {
+      console.error('[AppContext] Failed to update transaction on server:', err);
+    }
+  }, []);
+
+  const handleDeleteTransaction = useCallback(async (id: string) => {
+    setTransactions(prev => prev.filter(item => item.id !== id));
+    try {
+      await fetch(`/api/transactions?id=${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+      });
+    } catch (err) {
+      console.error('[AppContext] Failed to delete transaction on server:', err);
+    }
+  }, []);
+
+  const handleClearAllTransactions = useCallback(async () => {
+    setTransactions(() => []);
+    try {
+      await fetch('/api/transactions?all=true', {
+        method: 'DELETE',
+      });
+    } catch (err) {
+      console.error('[AppContext] Failed to clear all transactions on server:', err);
+    }
   }, []);
 
   return (
@@ -446,7 +490,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setDarkMode, setTransactions, setCategories, setMerchantRules, setBudgets,
       setBotPlatform, setIsAccountLinked, setOtpCode, setAutoSaveEnabled, setAutoSaveThreshold, setEditingTxModal,
       handleSendMessage, handleSampleReceipt, handleRealImageUpload, handleDraftAction,
-      exportToCSV, commitTransactionEdit, chatInput, setChatInput, fileInputRef
+      exportToCSV, commitTransactionEdit, handleDeleteTransaction, handleClearAllTransactions,
+      chatInput, setChatInput, fileInputRef
     }}>
       {children}
     </AppContext.Provider>

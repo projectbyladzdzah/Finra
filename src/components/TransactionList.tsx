@@ -6,7 +6,10 @@ import { Search, Edit3, Trash2, Eye, Download, X, Check } from 'lucide-react';
 import type { Transaction } from '@/lib/types';
 
 export default function TransactionList() {
-  const { darkMode, transactions, categories, setTransactions, exportToCSV, editingTxModal, setEditingTxModal, commitTransactionEdit } = useApp();
+  const {
+    darkMode, transactions, categories, exportToCSV,
+    editingTxModal, setEditingTxModal, commitTransactionEdit, handleDeleteTransaction
+  } = useApp();
   const [searchQuery, setSearchQuery] = useState('');
   const [filterCategory, setFilterCategory] = useState('ALL');
   const [filterType, setFilterType] = useState('ALL');
@@ -94,7 +97,7 @@ export default function TransactionList() {
                         <button onClick={() => setEditingTxModal(tx)} className={cn('p-1.5 rounded-lg transition', darkMode ? 'hover:bg-slate-800 text-slate-400 hover:text-white' : 'hover:bg-slate-200 text-slate-500')}>
                           <Edit3 className="w-3.5 h-3.5" />
                         </button>
-                        <button onClick={() => setTransactions(p => p.filter(i => i.id !== tx.id))} className={cn('p-1.5 rounded-lg transition', darkMode ? 'hover:bg-rose-500/10 text-slate-400 hover:text-rose-400' : 'hover:bg-rose-50 text-slate-500 hover:text-rose-500')}>
+                        <button onClick={() => handleDeleteTransaction(tx.id)} className={cn('p-1.5 rounded-lg transition', darkMode ? 'hover:bg-rose-500/10 text-slate-400 hover:text-rose-400' : 'hover:bg-rose-50 text-slate-500 hover:text-rose-500')}>
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       </div>
