@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Mail, ArrowRight, RefreshCw, CheckCircle2, AlertCircle, ShieldCheck, User, Phone, X } from 'lucide-react';
+import { Mail, ArrowRight, RefreshCw, CheckCircle2, AlertCircle, ShieldCheck, User } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface AuthScreenProps {
@@ -20,15 +20,9 @@ export default function AuthScreen({ onSuccess, darkMode = true }: AuthScreenPro
   const [email, setEmail] = useState('');
   const [otp, setOtp] = useState(['', '', '', '', '', '']);
 
-  // Modals & Social
-  const [socialModal, setSocialModal] = useState<'NONE' | 'WHATSAPP' | 'GOOGLE' | 'FACEBOOK'>('NONE');
-  const [waPhone, setWaPhone] = useState('');
-  const [socialName, setSocialName] = useState('');
-  const [socialEmail, setSocialEmail] = useState('');
-
   // Status
   const [loading, setLoading] = useState(false);
-  const [socialLoading, setSocialLoading] = useState(false);
+  const [socialLoading, setSocialLoading] = useState<'google' | 'facebook' | 'whatsapp' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [devOtp, setDevOtp] = useState<string | null>(null);
   const [countdown, setCountdown] = useState(0);
@@ -150,21 +144,16 @@ export default function AuthScreen({ onSuccess, darkMode = true }: AuthScreenPro
     }
   };
 
-  // Handle Social Login / Auto-Register
-  const handleSocialAuth = async (provider: 'google' | 'facebook' | 'whatsapp', payload?: { phone?: string; email?: string; name?: string }) => {
+  // 1-CLICK AUTOMATIC SOCIAL LOGIN & AUTO-REGISTER (ZERO INPUT DATA REQUIRED)
+  const handleInstantSocialAuth = async (provider: 'google' | 'facebook' | 'whatsapp') => {
     setError(null);
-    setSocialLoading(true);
+    setSocialLoading(provider);
 
     try {
       const res = await fetch('/api/auth/social', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          provider,
-          phone: payload?.phone,
-          email: payload?.email,
-          name: payload?.name,
-        }),
+        body: JSON.stringify({ provider }),
       });
 
       const data = await res.json();
@@ -172,12 +161,11 @@ export default function AuthScreen({ onSuccess, darkMode = true }: AuthScreenPro
         throw new Error(data.error || `Gagal masuk dengan ${provider}`);
       }
 
-      setSocialModal('NONE');
       onSuccess(data.user);
     } catch (err: any) {
-      setError(err.message || 'Gagal autentikasi sosial');
+      setError(err.message || 'Gagal masuk secara otomatis');
     } finally {
-      setSocialLoading(false);
+      setSocialLoading(null);
     }
   };
 
@@ -194,7 +182,7 @@ export default function AuthScreen({ onSuccess, darkMode = true }: AuthScreenPro
 
       <div className={cn(
         'w-full max-w-md relative z-10 rounded-3xl border p-7 sm:p-9 shadow-2xl backdrop-blur-xl',
-        darkMode ? 'bg-[#0f1420]/80 border-slate-800/80 shadow-black/60' : 'bg-white/95 border-slate-200 shadow-slate-200/50'
+        darkMode ? 'bg-[#0f1420]/85 border-slate-800/80 shadow-black/60' : 'bg-white/95 border-slate-200 shadow-slate-200/50'
       )}>
         {/* Brand Header */}
         <div className="flex items-center gap-3 mb-6">
@@ -250,57 +238,77 @@ export default function AuthScreen({ onSuccess, darkMode = true }: AuthScreenPro
         {/* STEP 1: FORM (LOGIN / REGISTER) */}
         {step === 'FORM' && (
           <div>
-            {/* Quick 1-Click Social Auto-Register Options */}
+            {/* 1-CLICK AUTOMATIC SOCIAL BUTTONS (NO DATA INPUT NEEDED) */}
             <div className="space-y-2.5 mb-6">
-              {/* WhatsApp Quick Register */}
+              {/* WhatsApp 1-Click Button */}
               <button
                 type="button"
-                onClick={() => setSocialModal('WHATSAPP')}
+                disabled={Boolean(socialLoading)}
+                onClick={() => handleInstantSocialAuth('whatsapp')}
                 className={cn(
-                  'w-full flex items-center justify-center gap-2.5 py-2.5 px-4 rounded-xl text-xs font-semibold border transition active:scale-[0.99]',
+                  'w-full flex items-center justify-center gap-2.5 py-2.5 px-4 rounded-xl text-xs font-semibold border transition active:scale-[0.99] disabled:opacity-50',
                   darkMode
                     ? 'bg-emerald-500/10 border-emerald-500/30 hover:bg-emerald-500/20 text-emerald-400'
                     : 'bg-emerald-50 border-emerald-200 hover:bg-emerald-100 text-emerald-800'
                 )}
               >
-                <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24">
-                  <path d="M12.031 6.172c-3.181 0-5.767 2.586-5.768 5.766-.001 1.298.38 2.27 1.019 3.287l-.582 2.128 2.182-.573c.978.58 1.911.928 3.145.929 3.178 0 5.767-2.587 5.768-5.766.001-3.187-2.575-5.77-5.764-5.771zm3.392 8.244c-.144.405-.837.774-1.17.824-.299.045-.677.063-1.092-.069-.252-.08-.575-.187-.988-.365-1.739-.751-2.874-2.502-2.961-2.617-.087-.116-.708-.94-.708-1.793s.448-1.273.607-1.446c.159-.173.346-.217.462-.217l.332.006c.106.005.249-.04.39.298.144.347.491 1.2.534 1.287.043.087.072.188.014.304-.058.116-.087.188-.173.289l-.26.304c-.087.086-.177.18-.076.354.101.174.449.741.964 1.201.662.591 1.221.774 1.394.86s.275.072.376-.043c.101-.116.433-.506.549-.68.116-.173.231-.145.39-.087s1.011.477 1.184.564.289.13.332.202c.045.072.045.419-.099.824zm-3.423-14.416c-6.627 0-12 5.373-12 12 0 2.159.579 4.178 1.594 5.91l-1.602 5.86 6.049-1.587c1.706.947 3.667 1.487 5.759 1.487 6.627 0 12-5.373 12-12 0-6.627-5.373-12-12-12z"/>
-                </svg>
-                <span>Lanjutkan dengan WhatsApp</span>
+                {socialLoading === 'whatsapp' ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Menghubungkan WhatsApp...</span>
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24">
+                      <path d="M12.031 6.172c-3.181 0-5.767 2.586-5.768 5.766-.001 1.298.38 2.27 1.019 3.287l-.582 2.128 2.182-.573c.978.58 1.911.928 3.145.929 3.178 0 5.767-2.587 5.768-5.766.001-3.187-2.575-5.77-5.764-5.771zm3.392 8.244c-.144.405-.837.774-1.17.824-.299.045-.677.063-1.092-.069-.252-.08-.575-.187-.988-.365-1.739-.751-2.874-2.502-2.961-2.617-.087-.116-.708-.94-.708-1.793s.448-1.273.607-1.446c.159-.173.346-.217.462-.217l.332.006c.106.005.249-.04.39.298.144.347.491 1.2.534 1.287.043.087.072.188.014.304-.058.116-.087.188-.173.289l-.26.304c-.087.086-.177.18-.076.354.101.174.449.741.964 1.201.662.591 1.221.774 1.394.86s.275.072.376-.043c.101-.116.433-.506.549-.68.116-.173.231-.145.39-.087s1.011.477 1.184.564.289.13.332.202c.045.072.045.419-.099.824zm-3.423-14.416c-6.627 0-12 5.373-12 12 0 2.159.579 4.178 1.594 5.91l-1.602 5.86 6.049-1.587c1.706.947 3.667 1.487 5.759 1.487 6.627 0 12-5.373 12-12 0-6.627-5.373-12-12-12z"/>
+                    </svg>
+                    <span>Lanjutkan otomatis dengan WhatsApp</span>
+                  </>
+                )}
               </button>
 
               <div className="grid grid-cols-2 gap-2">
-                {/* Google Button */}
+                {/* Google 1-Click Button */}
                 <button
                   type="button"
-                  onClick={() => setSocialModal('GOOGLE')}
+                  disabled={Boolean(socialLoading)}
+                  onClick={() => handleInstantSocialAuth('google')}
                   className={cn(
-                    'flex items-center justify-center gap-2 py-2 px-3 rounded-xl text-xs font-medium border transition active:scale-[0.99]',
-                    darkMode ? 'bg-slate-900 border-slate-700/80 hover:bg-slate-850 text-slate-200' : 'bg-white border-slate-200 hover:bg-slate-50 text-slate-700'
+                    'flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-xs font-medium border transition active:scale-[0.99] disabled:opacity-50',
+                    darkMode ? 'bg-slate-900 border-slate-700/80 hover:bg-slate-800 text-slate-200' : 'bg-white border-slate-200 hover:bg-slate-50 text-slate-700'
                   )}
                 >
-                  <svg className="w-3.5 h-3.5" viewBox="0 0 24 24">
-                    <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.17z"/>
-                    <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.33 24 12 24z"/>
-                    <path fill="#FBBC05" d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.18 0 10.04 0 12s.45 3.82 1.25 5.42l4.03-3.15z"/>
-                    <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.33 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98z"/>
-                  </svg>
-                  <span>Google</span>
+                  {socialLoading === 'google' ? (
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24">
+                      <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.17z"/>
+                      <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.33 24 12 24z"/>
+                      <path fill="#FBBC05" d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.18 0 10.04 0 12s.45 3.82 1.25 5.42l4.03-3.15z"/>
+                      <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.33 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98z"/>
+                    </svg>
+                  )}
+                  <span>{socialLoading === 'google' ? 'Menghubungkan...' : 'Google'}</span>
                 </button>
 
-                {/* Facebook Button */}
+                {/* Facebook 1-Click Button */}
                 <button
                   type="button"
-                  onClick={() => setSocialModal('FACEBOOK')}
+                  disabled={Boolean(socialLoading)}
+                  onClick={() => handleInstantSocialAuth('facebook')}
                   className={cn(
-                    'flex items-center justify-center gap-2 py-2 px-3 rounded-xl text-xs font-medium border transition active:scale-[0.99]',
-                    darkMode ? 'bg-slate-900 border-slate-700/80 hover:bg-slate-850 text-slate-200' : 'bg-white border-slate-200 hover:bg-slate-50 text-slate-700'
+                    'flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-xs font-medium border transition active:scale-[0.99] disabled:opacity-50',
+                    darkMode ? 'bg-slate-900 border-slate-700/80 hover:bg-slate-800 text-slate-200' : 'bg-white border-slate-200 hover:bg-slate-50 text-slate-700'
                   )}
                 >
-                  <svg className="w-3.5 h-3.5 fill-[#1877F2]" viewBox="0 0 24 24">
-                    <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
-                  </svg>
-                  <span>Facebook</span>
+                  {socialLoading === 'facebook' ? (
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <svg className="w-3.5 h-3.5 fill-[#1877F2] shrink-0" viewBox="0 0 24 24">
+                      <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
+                    </svg>
+                  )}
+                  <span>{socialLoading === 'facebook' ? 'Menghubungkan...' : 'Facebook'}</span>
                 </button>
               </div>
             </div>
@@ -491,123 +499,6 @@ export default function AuthScreen({ onSuccess, darkMode = true }: AuthScreenPro
           </div>
         )}
       </div>
-
-      {/* WHATSAPP MODAL */}
-      {socialModal === 'WHATSAPP' && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in">
-          <div className={cn(
-            'w-full max-w-sm rounded-2xl border p-6 shadow-2xl relative',
-            darkMode ? 'bg-[#0f1420] border-slate-800 text-slate-100' : 'bg-white border-slate-200 text-slate-900'
-          )}>
-            <button
-              onClick={() => setSocialModal('NONE')}
-              className="absolute top-4 right-4 p-1 rounded-lg text-slate-400 hover:text-slate-200 transition"
-            >
-              <X className="w-4 h-4" />
-            </button>
-            <div className="flex items-center gap-2.5 mb-4">
-              <div className="w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
-                <Phone className="w-4 h-4" />
-              </div>
-              <h3 className="font-bold text-base">Masuk via WhatsApp</h3>
-            </div>
-            <p className={cn('text-xs leading-relaxed mb-4', darkMode ? 'text-slate-400' : 'text-slate-500')}>
-              Masukkan nomor WhatsApp Anda untuk auto-register & menghubungkan akun Finra Anda secara instan.
-            </p>
-            <form onSubmit={e => { e.preventDefault(); if (waPhone) handleSocialAuth('whatsapp', { phone: waPhone }); }} className="space-y-4">
-              <div>
-                <label className="block text-xs font-medium mb-1">Nomor WhatsApp</label>
-                <input
-                  type="tel"
-                  required
-                  placeholder="08123456789 atau 62812..."
-                  value={waPhone}
-                  onChange={e => setWaPhone(e.target.value)}
-                  className={cn(
-                    'w-full px-3.5 py-2.5 rounded-xl text-sm border outline-none font-mono',
-                    darkMode ? 'bg-slate-900 border-slate-700 text-slate-100' : 'bg-slate-50 border-slate-200 text-slate-900'
-                  )}
-                />
-              </div>
-              <button
-                type="submit"
-                disabled={socialLoading || !waPhone}
-                className="w-full py-2.5 rounded-xl text-sm font-semibold bg-emerald-500 hover:bg-emerald-600 text-white flex items-center justify-center gap-2 transition"
-              >
-                {socialLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <span>Hubungkan & Masuk</span>}
-              </button>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* GOOGLE & FACEBOOK POPUP MODAL */}
-      {(socialModal === 'GOOGLE' || socialModal === 'FACEBOOK') && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in">
-          <div className={cn(
-            'w-full max-w-sm rounded-2xl border p-6 shadow-2xl relative',
-            darkMode ? 'bg-[#0f1420] border-slate-800 text-slate-100' : 'bg-white border-slate-200 text-slate-900'
-          )}>
-            <button
-              onClick={() => setSocialModal('NONE')}
-              className="absolute top-4 right-4 p-1 rounded-lg text-slate-400 hover:text-slate-200 transition"
-            >
-              <X className="w-4 h-4" />
-            </button>
-            <div className="flex items-center gap-2.5 mb-3">
-              <h3 className="font-bold text-base">
-                Lanjutkan dengan {socialModal === 'GOOGLE' ? 'Google' : 'Facebook'}
-              </h3>
-            </div>
-            <p className={cn('text-xs leading-relaxed mb-4', darkMode ? 'text-slate-400' : 'text-slate-500')}>
-              Auto-register akun Finra secara instan menggunakan profil {socialModal === 'GOOGLE' ? 'Google' : 'Facebook'} Anda.
-            </p>
-
-            <form onSubmit={e => {
-              e.preventDefault();
-              handleSocialAuth(socialModal === 'GOOGLE' ? 'google' : 'facebook', {
-                email: socialEmail || undefined,
-                name: socialName || undefined,
-              });
-            }} className="space-y-3.5">
-              <div>
-                <label className="block text-xs font-medium mb-1">Nama</label>
-                <input
-                  type="text"
-                  placeholder={socialModal === 'GOOGLE' ? 'Nama Akun Google' : 'Nama Akun Facebook'}
-                  value={socialName}
-                  onChange={e => setSocialName(e.target.value)}
-                  className={cn(
-                    'w-full px-3.5 py-2.5 rounded-xl text-sm border outline-none',
-                    darkMode ? 'bg-slate-900 border-slate-700 text-slate-100' : 'bg-slate-50 border-slate-200 text-slate-900'
-                  )}
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium mb-1">Email</label>
-                <input
-                  type="email"
-                  placeholder={socialModal === 'GOOGLE' ? 'user@gmail.com' : 'user@facebook.com'}
-                  value={socialEmail}
-                  onChange={e => setSocialEmail(e.target.value)}
-                  className={cn(
-                    'w-full px-3.5 py-2.5 rounded-xl text-sm border outline-none',
-                    darkMode ? 'bg-slate-900 border-slate-700 text-slate-100' : 'bg-slate-50 border-slate-200 text-slate-900'
-                  )}
-                />
-              </div>
-
-              <button
-                type="submit"
-                disabled={socialLoading}
-                className="w-full py-2.5 rounded-xl text-sm font-semibold bg-emerald-500 hover:bg-emerald-600 text-white flex items-center justify-center gap-2 transition"
-              >
-                {socialLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <span>Masuk Instan (1-Click)</span>}
-              </button>
-            </form>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

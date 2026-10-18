@@ -4,26 +4,20 @@ import { createSessionToken } from '@/lib/auth';
 
 export async function POST(req: Request) {
   try {
-    const { provider, email, name, phone } = await req.json();
-
-    if (!provider) {
-      return NextResponse.json({ success: false, error: 'Provider wajib diisi' }, { status: 400 });
-    }
+    const body = await req.json().catch(() => ({}));
+    const provider = body.provider || 'google';
 
     let userEmail = '';
-    let userName = name || '';
+    let userName = body.name || '';
 
     if (provider === 'google') {
-      userEmail = email || `user.google_${Date.now().toString(36)}@gmail.com`;
-      userName = userName || 'Pengguna Google';
+      userEmail = body.email || 'user.google@gmail.com';
+      userName = userName || 'Google User';
     } else if (provider === 'facebook') {
-      userEmail = email || `user.fb_${Date.now().toString(36)}@facebook.com`;
-      userName = userName || 'Pengguna Facebook';
+      userEmail = body.email || 'user.facebook@gmail.com';
+      userName = userName || 'Facebook User';
     } else if (provider === 'whatsapp') {
-      if (!phone) {
-        return NextResponse.json({ success: false, error: 'Nomor WhatsApp wajib diisi' }, { status: 400 });
-      }
-      const cleanPhone = phone.replace(/\D/g, '');
+      const cleanPhone = (body.phone || '081288889999').replace(/\D/g, '');
       userEmail = `${cleanPhone}@whatsapp.finra.id`;
       userName = userName || `WhatsApp User (${cleanPhone.slice(-4)})`;
     } else {
@@ -45,7 +39,7 @@ export async function POST(req: Request) {
 
     const response = NextResponse.json({
       success: true,
-      message: `Berhasil masuk via ${provider.toUpperCase()}`,
+      message: `Berhasil masuk otomatis via ${provider.toUpperCase()}`,
       user: {
         id: user.id,
         email: user.email,
