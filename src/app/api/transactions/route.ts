@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { getTransactions, addTransaction } from '@/lib/server-store';
 
 export async function GET() {
-  const transactions = getTransactions();
+  const transactions = await getTransactions();
   return NextResponse.json({
     success: true,
     data: transactions,
@@ -20,7 +20,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const newTx = addTransaction({
+    const newTx = await addTransaction({
       date: body.date || new Date().toISOString().replace('T', ' ').substring(0, 16),
       type: body.type || 'expense',
       category: body.category || 'Lainnya',

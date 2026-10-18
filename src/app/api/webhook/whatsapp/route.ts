@@ -117,7 +117,7 @@ export async function POST(req: Request) {
 
     // 2. REKAP / LAPORAN COMMAND
     if (['rekap', 'laporan', 'saldo', 'ringkasan'].includes(lower)) {
-      const txs = getTransactions();
+      const txs = await getTransactions();
       const totalIncome = txs.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
       const totalExpense = txs.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
       const net = totalIncome - totalExpense;
@@ -148,7 +148,7 @@ export async function POST(req: Request) {
       if (!desc) desc = cleanMsg;
 
       // Add to store
-      const newTx = addTransaction({
+      const newTx = await addTransaction({
         date: getNowFormatted(),
         type,
         category,
