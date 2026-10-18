@@ -28,10 +28,10 @@ export default function Sidebar({ activeTab, onTabChange }: SidebarProps) {
       <div className="px-5 py-4 border-b border-slate-800/50">
         <div className="flex items-center gap-2.5">
           <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-emerald-400 to-indigo-500 flex items-center justify-center text-white font-black text-xs shadow-lg shadow-emerald-500/20">
-            FB
+            FR
           </div>
           <div>
-            <div className="font-bold text-sm tracking-tight">FinBot AI</div>
+            <div className="font-bold text-sm tracking-tight">Finra</div>
             <div className={cn('text-[10px] font-mono', darkMode ? 'text-emerald-400' : 'text-emerald-600')}>
               v2.4 • active
             </div>

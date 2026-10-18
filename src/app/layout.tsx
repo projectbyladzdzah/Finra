@@ -7,9 +7,9 @@ const geist = Geist({ subsets: ['latin'], variable: '--font-geist' });
 const geistMono = Geist_Mono({ subsets: ['latin'], variable: '--font-geist-mono' });
 
 export const metadata: Metadata = {
-  title: 'FinBot AI — Catatan Keuangan Otomatis',
-  description: 'Aplikasi catatan keuangan otomatis berbasis AI untuk Telegram & WhatsApp. Ekstrak transaksi dari teks & foto struk secara instan.',
-  keywords: 'catatan keuangan, finbot, bot keuangan, telegram, whatsapp, AI keuangan',
+  title: 'Finra — Catatan Keuangan Otomatis & Cerdas',
+  description: 'Asisten keuangan otomatis berbasis AI untuk WhatsApp & Telegram. Ekstrak transaksi dari chat & foto struk secara instan.',
+  keywords: 'catatan keuangan, finra, bot keuangan, whatsapp bot, AI keuangan, asisten finansial',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

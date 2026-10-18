@@ -65,7 +65,7 @@ async function sendFonnteReply(target: string, message: string) {
 export async function GET() {
   return NextResponse.json({
     status: 'active',
-    service: 'FinBot WhatsApp Webhook',
+    service: 'Finra WhatsApp Webhook',
     timestamp: new Date().toISOString(),
   });
 }
@@ -101,7 +101,7 @@ export async function POST(req: Request) {
 
     // 1. HELP / BANTUAN COMMAND
     if (['help', 'bantuan', 'menu', 'halo', 'hi', 'start'].includes(lower)) {
-      const helpText = `👋 *Halo, ${name}!*\nSaya adalah asisten keuangan otomatis FinBot.\n\n` +
+      const helpText = `👋 *Halo, ${name}!*\nSaya adalah asisten keuangan otomatis Finra.\n\n` +
         `📝 *Cara Catat Transaksi:*\n` +
         `Ketik langsung pengeluaran/pemasukan Anda:\n` +
         `• _"Makan siang sate ayam 35rb"_\n` +
@@ -171,7 +171,7 @@ export async function POST(req: Request) {
         `💰 *Nominal:* ${formatRupiah(parsedAmount)}\n` +
         `🏷️ *Kategori:* ${category}\n` +
         `🕒 *Waktu:* ${newTx.date}\n\n` +
-        `_Data otomatis tersinkronisasi ke Dashboard FinBot._ ✨`;
+        `_Data otomatis tersinkronisasi ke Dashboard Finra._ ✨`;
 
       await sendFonnteReply(sender, confirmReply);
 

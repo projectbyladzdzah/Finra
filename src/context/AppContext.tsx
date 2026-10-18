@@ -82,7 +82,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [messages, setMessages] = useState<ChatMessage[]>([{
     id: 'msg-welcome', sender: 'bot', timestamp: '10:00',
     engineBadge: 'SYSTEM READY',
-    text: '⚡ *FinBot AI*\n\nKirim transaksi via chat:\n• `"makan siang 25rb gofood"`\n• `"gaji masuk 8jt"`\n• Klik tombol struk di bawah untuk simulasi Vision OCR.',
+    text: '⚡ *Finra*\n\nKirim transaksi via chat:\n• `"makan siang 25rb gofood"`\n• `"gaji masuk 8jt"`\n• Klik tombol struk di bawah untuk simulasi Vision OCR.',
     draft: undefined
   }]);
 

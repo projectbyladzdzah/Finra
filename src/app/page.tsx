@@ -84,8 +84,8 @@ export default function Home() {
             <div className={cn('absolute left-0 top-0 h-full w-56 border-r shadow-xl', darkMode ? 'bg-[#0a0d14] border-slate-800' : 'bg-white border-slate-200')} onClick={e => e.stopPropagation()}>
               <div className="p-4">
                 <div className="flex items-center gap-2.5 mb-6">
-                  <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-emerald-400 to-indigo-500 flex items-center justify-center text-white font-black text-xs">FB</div>
-                  <span className="font-bold">FinBot AI</span>
+                  <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-emerald-400 to-indigo-500 flex items-center justify-center text-white font-black text-xs">FR</div>
+                  <span className="font-bold">Finra</span>
                 </div>
                 <nav className="space-y-1">
                   {NAV_ITEMS.map(({ id, icon: Icon }) => (
