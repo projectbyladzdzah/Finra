@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Mail, ArrowRight, RefreshCw, CheckCircle2, AlertCircle, ShieldCheck, User, Phone, X, ExternalLink } from 'lucide-react';
+import { Mail, ArrowRight, RefreshCw, AlertCircle, ShieldCheck, User, Phone, X, ExternalLink, KeyRound, CheckCircle2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface AuthScreenProps {
@@ -15,10 +15,12 @@ export default function AuthScreen({ onSuccess, darkMode = true }: AuthScreenPro
   // Steps: 'FORM' or 'EMAIL_OTP'
   const [step, setStep] = useState<'FORM' | 'EMAIL_OTP'>('FORM');
 
-  // Modals for Google Account Chooser, Facebook Link, and WhatsApp OTP/Link
-  const [activeModal, setActiveModal] = useState<'NONE' | 'GOOGLE' | 'FACEBOOK' | 'WHATSAPP'>('NONE');
+  // Modals
+  const [showWaModal, setShowWaModal] = useState(false);
+  const [showGoogleSetupModal, setShowGoogleSetupModal] = useState(false);
+  const [showFbSetupModal, setShowFbSetupModal] = useState(false);
 
-  // Form inputs
+  // Form inputs for Email OTP
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [otp, setOtp] = useState(['', '', '', '', '', '']);
@@ -31,10 +33,11 @@ export default function AuthScreen({ onSuccess, darkMode = true }: AuthScreenPro
   const [waDevOtp, setWaDevOtp] = useState<string | null>(null);
   const [waCountdown, setWaCountdown] = useState(0);
 
-  // Custom Google/Facebook input if user chooses "Gunakan akun lain"
-  const [customGoogleEmail, setCustomGoogleEmail] = useState('');
-  const [customGoogleName, setCustomGoogleName] = useState('');
-  const [showCustomGoogle, setShowCustomGoogle] = useState(false);
+  // OAuth Config Form (if user wants to paste credentials directly)
+  const [inputGoogleClientId, setInputGoogleClientId] = useState('');
+  const [inputGoogleClientSecret, setInputGoogleClientSecret] = useState('');
+  const [savingOAuth, setSavingOAuth] = useState(false);
+  const [oauthSaveSuccess, setOauthSaveSuccess] = useState<string | null>(null);
 
   // Status
   const [loading, setLoading] = useState(false);
@@ -45,6 +48,24 @@ export default function AuthScreen({ onSuccess, darkMode = true }: AuthScreenPro
 
   const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
   const waInputRefs = useRef<(HTMLInputElement | null)[]>([]);
+
+  // Check URL query parameters for auth notifications/errors on initial mount
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const notice = params.get('auth_notice');
+      const err = params.get('auth_error');
+
+      if (err) {
+        setError(decodeURIComponent(err));
+      }
+      if (notice === 'google_credentials_needed') {
+        setShowGoogleSetupModal(true);
+      } else if (notice === 'facebook_credentials_needed') {
+        setShowFbSetupModal(true);
+      }
+    }
+  }, []);
 
   // Timer countdowns
   useEffect(() => {
@@ -71,7 +92,55 @@ export default function AuthScreen({ onSuccess, darkMode = true }: AuthScreenPro
     }
   }, [waStep]);
 
-  // 1. EMAIL OTP HANDLERS
+  // 1. REAL GOOGLE OAUTH REDIRECT HANDLER (Navigates directly to accounts.google.com)
+  const handleGoogleLogin = async () => {
+    setError(null);
+    setSocialLoading(true);
+    // Real OAuth 2.0 flow: Browser navigates to /api/auth/signin/google
+    // If GOOGLE_CLIENT_ID is set in .env.local, it redirects straight to official accounts.google.com!
+    window.location.href = '/api/auth/signin/google';
+  };
+
+  // 2. REAL FACEBOOK OAUTH REDIRECT HANDLER (Navigates directly to facebook.com)
+  const handleFacebookLogin = async () => {
+    setError(null);
+    setSocialLoading(true);
+    window.location.href = '/api/auth/signin/facebook';
+  };
+
+  // 3. SAVE GOOGLE OAUTH CREDENTIALS DIRECTLY
+  const handleSaveGoogleCredentials = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSavingOAuth(true);
+    setError(null);
+
+    try {
+      const res = await fetch('/api/auth/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          googleClientId: inputGoogleClientId.trim(),
+          googleClientSecret: inputGoogleClientSecret.trim(),
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Gagal menyimpan kredensial');
+      }
+
+      setOauthSaveSuccess('Kredensial tersimpan! Mengalihkan ke halaman resmi Google...');
+      setTimeout(() => {
+        window.location.href = '/api/auth/signin/google';
+      }, 1200);
+    } catch (err: any) {
+      setError(err.message || 'Gagal menyimpan kredensial');
+    } finally {
+      setSavingOAuth(false);
+    }
+  };
+
+  // 4. EMAIL OTP HANDLERS
   const handleSendOtp = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     setError(null);
@@ -129,7 +198,7 @@ export default function AuthScreen({ onSuccess, darkMode = true }: AuthScreenPro
     }
   };
 
-  // 2. WHATSAPP SEND & VERIFY HANDLERS
+  // 5. WHATSAPP SEND & VERIFY HANDLERS
   const handleSendWaOtp = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     setError(null);
@@ -180,40 +249,10 @@ export default function AuthScreen({ onSuccess, darkMode = true }: AuthScreenPro
         throw new Error(data.error || 'Kode verifikasi WhatsApp salah atau telah kadaluarsa');
       }
 
-      setActiveModal('NONE');
+      setShowWaModal(false);
       onSuccess(data.user);
     } catch (err: any) {
       setError(err.message || 'Verifikasi WhatsApp gagal');
-    } finally {
-      setSocialLoading(false);
-    }
-  };
-
-  // 3. GOOGLE & FACEBOOK ACCOUNT LINKING HANDLER
-  const handleLinkSocialAccount = async (provider: 'google' | 'facebook', profile: { email: string; name: string }) => {
-    setError(null);
-    setSocialLoading(true);
-
-    try {
-      const res = await fetch('/api/auth/social', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          provider,
-          email: profile.email,
-          name: profile.name,
-        }),
-      });
-
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || `Gagal menautkan akun ${provider}`);
-      }
-
-      setActiveModal('NONE');
-      onSuccess(data.user);
-    } catch (err: any) {
-      setError(err.message || 'Gagal menautkan akun');
     } finally {
       setSocialLoading(false);
     }
@@ -224,7 +263,7 @@ export default function AuthScreen({ onSuccess, darkMode = true }: AuthScreenPro
       'min-h-screen flex items-center justify-center p-4 sm:p-6 transition-colors duration-200',
       darkMode ? 'bg-[#080b11] text-slate-100' : 'bg-slate-50 text-slate-900'
     )}>
-      {/* Decorative background glow */}
+      {/* Decorative background ambient glows */}
       <div className="fixed inset-0 overflow-hidden pointer-events-none">
         <div className="absolute -top-40 -left-40 w-96 h-96 bg-emerald-500/10 rounded-full blur-3xl" />
         <div className="absolute -bottom-40 -right-40 w-96 h-96 bg-indigo-500/10 rounded-full blur-3xl" />
@@ -288,48 +327,39 @@ export default function AuthScreen({ onSuccess, darkMode = true }: AuthScreenPro
         {/* STEP 1: FORM (LOGIN / REGISTER) */}
         {step === 'FORM' && (
           <div>
-            {/* Social Verification Options */}
+            {/* Real Social Authentication Buttons */}
             <div className="space-y-2.5 mb-6">
-              {/* WhatsApp Button (Opens WA OTP & Magic Link Dialog) */}
+              {/* REAL GOOGLE OAUTH BUTTON: Navigates straight to Google OAuth page */}
               <button
                 type="button"
-                onClick={() => { setActiveModal('WHATSAPP'); setError(null); setWaStep('INPUT'); }}
+                onClick={handleGoogleLogin}
+                disabled={socialLoading}
                 className={cn(
-                  'w-full flex items-center justify-center gap-2.5 py-2.5 px-4 rounded-xl text-xs font-semibold border transition active:scale-[0.99]',
+                  'w-full flex items-center justify-center gap-3 py-2.5 px-4 rounded-xl text-xs font-semibold border transition active:scale-[0.99] group',
                   darkMode
-                    ? 'bg-emerald-500/10 border-emerald-500/30 hover:bg-emerald-500/20 text-emerald-400'
-                    : 'bg-emerald-50 border-emerald-200 hover:bg-emerald-100 text-emerald-800'
+                    ? 'bg-slate-900/90 border-slate-700/80 hover:bg-slate-800 text-slate-200 hover:border-slate-600'
+                    : 'bg-white border-slate-200 hover:bg-slate-50 text-slate-700 hover:border-slate-300'
                 )}
               >
-                <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24">
-                  <path d="M12.031 6.172c-3.181 0-5.767 2.586-5.768 5.766-.001 1.298.38 2.27 1.019 3.287l-.582 2.128 2.182-.573c.978.58 1.911.928 3.145.929 3.178 0 5.767-2.587 5.768-5.766.001-3.187-2.575-5.77-5.764-5.771zm3.392 8.244c-.144.405-.837.774-1.17.824-.299.045-.677.063-1.092-.069-.252-.08-.575-.187-.988-.365-1.739-.751-2.874-2.502-2.961-2.617-.087-.116-.708-.94-.708-1.793s.448-1.273.607-1.446c.159-.173.346-.217.462-.217l.332.006c.106.005.249-.04.39.298.144.347.491 1.2.534 1.287.043.087.072.188.014.304-.058.116-.087.188-.173.289l-.26.304c-.087.086-.177.18-.076.354.101.174.449.741.964 1.201.662.591 1.221.774 1.394.86s.275.072.376-.043c.101-.116.433-.506.549-.68.116-.173.231-.145.39-.087s1.011.477 1.184.564.289.13.332.202c.045.072.045.419-.099.824zm-3.423-14.416c-6.627 0-12 5.373-12 12 0 2.159.579 4.178 1.594 5.91l-1.602 5.86 6.049-1.587c1.706.947 3.667 1.487 5.759 1.487 6.627 0 12-5.373 12-12 0-6.627-5.373-12-12-12z"/>
-                </svg>
-                <span>Masuk via WhatsApp (Kode OTP & Magic Link)</span>
-              </button>
-
-              <div className="grid grid-cols-2 gap-2">
-                {/* Google Button (Opens Account Selector) */}
-                <button
-                  type="button"
-                  onClick={() => { setActiveModal('GOOGLE'); setError(null); }}
-                  className={cn(
-                    'flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-xs font-medium border transition active:scale-[0.99]',
-                    darkMode ? 'bg-slate-900 border-slate-700/80 hover:bg-slate-800 text-slate-200' : 'bg-white border-slate-200 hover:bg-slate-50 text-slate-700'
-                  )}
-                >
-                  <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24">
+                {socialLoading ? (
+                  <RefreshCw className="w-4 h-4 animate-spin text-emerald-400" />
+                ) : (
+                  <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
                     <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.17z"/>
                     <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.33 24 12 24z"/>
                     <path fill="#FBBC05" d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.18 0 10.04 0 12s.45 3.82 1.25 5.42l4.03-3.15z"/>
                     <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.33 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98z"/>
                   </svg>
-                  <span>Pilih Akun Google</span>
-                </button>
+                )}
+                <span>Lanjutkan dengan Google (accounts.google.com)</span>
+              </button>
 
-                {/* Facebook Button (Opens FB Link Account) */}
+              <div className="grid grid-cols-2 gap-2">
+                {/* REAL FACEBOOK OAUTH BUTTON */}
                 <button
                   type="button"
-                  onClick={() => { setActiveModal('FACEBOOK'); setError(null); }}
+                  onClick={handleFacebookLogin}
+                  disabled={socialLoading}
                   className={cn(
                     'flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-xs font-medium border transition active:scale-[0.99]',
                     darkMode ? 'bg-slate-900 border-slate-700/80 hover:bg-slate-800 text-slate-200' : 'bg-white border-slate-200 hover:bg-slate-50 text-slate-700'
@@ -338,7 +368,24 @@ export default function AuthScreen({ onSuccess, darkMode = true }: AuthScreenPro
                   <svg className="w-3.5 h-3.5 fill-[#1877F2] shrink-0" viewBox="0 0 24 24">
                     <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
                   </svg>
-                  <span>Tautkan Facebook</span>
+                  <span>Facebook</span>
+                </button>
+
+                {/* WhatsApp Button (Opens WA OTP & Magic Link Dialog) */}
+                <button
+                  type="button"
+                  onClick={() => { setShowWaModal(true); setError(null); setWaStep('INPUT'); }}
+                  className={cn(
+                    'flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-xs font-medium border transition active:scale-[0.99]',
+                    darkMode
+                      ? 'bg-emerald-500/10 border-emerald-500/30 hover:bg-emerald-500/20 text-emerald-400'
+                      : 'bg-emerald-50 border-emerald-200 hover:bg-emerald-100 text-emerald-800'
+                  )}
+                >
+                  <svg className="w-3.5 h-3.5 fill-current shrink-0" viewBox="0 0 24 24">
+                    <path d="M12.031 6.172c-3.181 0-5.767 2.586-5.768 5.766-.001 1.298.38 2.27 1.019 3.287l-.582 2.128 2.182-.573c.978.58 1.911.928 3.145.929 3.178 0 5.767-2.587 5.768-5.766.001-3.187-2.575-5.77-5.764-5.771zm3.392 8.244c-.144.405-.837.774-1.17.824-.299.045-.677.063-1.092-.069-.252-.08-.575-.187-.988-.365-1.739-.751-2.874-2.502-2.961-2.617-.087-.116-.708-.94-.708-1.793s.448-1.273.607-1.446c.159-.173.346-.217.462-.217l.332.006c.106.005.249-.04.39.298.144.347.491 1.2.534 1.287.043.087.072.188.014.304-.058.116-.087.188-.173.289l-.26.304c-.087.086-.177.18-.076.354.101.174.449.741.964 1.201.662.591 1.221.774 1.394.86s.275.072.376-.043c.101-.116.433-.506.549-.68.116-.173.231-.145.39-.087s1.011.477 1.184.564.289.13.332.202c.045.072.045.419-.099.824zm-3.423-14.416c-6.627 0-12 5.373-12 12 0 2.159.579 4.178 1.594 5.91l-1.602 5.86 6.049-1.587c1.706.947 3.667 1.487 5.759 1.487 6.627 0 12-5.373 12-12 0-6.627-5.373-12-12-12z"/>
+                  </svg>
+                  <span>WhatsApp OTP</span>
                 </button>
               </div>
             </div>
@@ -423,7 +470,7 @@ export default function AuthScreen({ onSuccess, darkMode = true }: AuthScreenPro
 
             <div className={cn('mt-6 pt-5 border-t flex items-center justify-center gap-2 text-[11px]', darkMode ? 'border-slate-800 text-slate-500' : 'border-slate-200 text-slate-400')}>
               <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-              <span>Verifikasi instan via Resend & data tersimpan di Neon Postgres</span>
+              <span>Verifikasi resmi Resend & data tersimpan di Neon Postgres</span>
             </div>
           </div>
         )}
@@ -509,209 +556,190 @@ export default function AuthScreen({ onSuccess, darkMode = true }: AuthScreenPro
       </div>
 
       {/* ────────────────────────────────────────────────────────────────────────── */}
-      {/* 1. GOOGLE ACCOUNT SELECTOR DIALOG                                          */}
+      {/* GOOGLE OAUTH CONFIGURATION MODAL (Shown when Client ID is needed)           */}
       {/* ────────────────────────────────────────────────────────────────────────── */}
-      {activeModal === 'GOOGLE' && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in">
+      {showGoogleSetupModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md animate-in fade-in">
           <div className={cn(
-            'w-full max-w-sm rounded-3xl border p-6 shadow-2xl relative',
+            'w-full max-w-lg rounded-3xl border p-6 sm:p-7 shadow-2xl relative',
             darkMode ? 'bg-[#0f1420] border-slate-800 text-slate-100' : 'bg-white border-slate-200 text-slate-900'
           )}>
             <button
-              onClick={() => { setActiveModal('NONE'); setShowCustomGoogle(false); }}
+              onClick={() => setShowGoogleSetupModal(false)}
               className="absolute top-4 right-4 p-1.5 rounded-lg text-slate-400 hover:text-slate-200 transition"
             >
-              <X className="w-4 h-4" />
+              <X className="w-5 h-5" />
             </button>
 
-            {/* Google Header */}
-            <div className="flex flex-col items-center text-center mb-5">
-              <svg className="w-8 h-8 mb-2.5" viewBox="0 0 24 24">
-                <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.17z"/>
-                <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.33 24 12 24z"/>
-                <path fill="#FBBC05" d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.18 0 10.04 0 12s.45 3.82 1.25 5.42l4.03-3.15z"/>
-                <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.33 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98z"/>
-              </svg>
-              <h3 className="font-bold text-base">Pilih akun untuk melanjutkan ke Finra</h3>
-              <p className={cn('text-[11px] mt-1', darkMode ? 'text-slate-400' : 'text-slate-500')}>
-                Google akan membagikan nama dan email Anda untuk menautkan akun Finra.
-              </p>
-            </div>
-
-            {/* List of Accounts to pick */}
-            {!showCustomGoogle ? (
-              <div className="space-y-2">
-                {/* Account 1 */}
-                <button
-                  onClick={() => handleLinkSocialAccount('google', { email: 'ladzdzah.official@gmail.com', name: 'Ladzdzah Official' })}
-                  disabled={socialLoading}
-                  className={cn(
-                    'w-full flex items-center gap-3 p-3 rounded-2xl border text-left transition hover:scale-[1.01] active:scale-[0.99]',
-                    darkMode ? 'bg-slate-900/80 border-slate-800 hover:border-slate-700' : 'bg-slate-50 border-slate-200 hover:border-slate-300'
-                  )}
-                >
-                  <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-amber-500 to-rose-500 text-white font-bold flex items-center justify-center text-xs shrink-0 shadow">
-                    L
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="font-semibold text-xs truncate">Ladzdzah Official</div>
-                    <div className={cn('text-[11px] truncate', darkMode ? 'text-slate-400' : 'text-slate-500')}>ladzdzah.official@gmail.com</div>
-                  </div>
-                </button>
-
-                {/* Account 2 */}
-                <button
-                  onClick={() => handleLinkSocialAccount('google', { email: 'alex.developer@gmail.com', name: 'Alex Developer' })}
-                  disabled={socialLoading}
-                  className={cn(
-                    'w-full flex items-center gap-3 p-3 rounded-2xl border text-left transition hover:scale-[1.01] active:scale-[0.99]',
-                    darkMode ? 'bg-slate-900/80 border-slate-800 hover:border-slate-700' : 'bg-slate-50 border-slate-200 hover:border-slate-300'
-                  )}
-                >
-                  <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-indigo-500 to-cyan-500 text-white font-bold flex items-center justify-center text-xs shrink-0 shadow">
-                    A
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="font-semibold text-xs truncate">Alex Developer</div>
-                    <div className={cn('text-[11px] truncate', darkMode ? 'text-slate-400' : 'text-slate-500')}>alex.developer@gmail.com</div>
-                  </div>
-                </button>
-
-                {/* Option: Gunakan Akun Lain */}
-                <button
-                  onClick={() => setShowCustomGoogle(true)}
-                  className={cn(
-                    'w-full flex items-center gap-3 p-3 rounded-2xl border text-left transition',
-                    darkMode ? 'border-dashed border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700' : 'border-dashed border-slate-300 text-slate-600 hover:text-slate-900'
-                  )}
-                >
-                  <div className={cn('w-9 h-9 rounded-full flex items-center justify-center text-xs shrink-0', darkMode ? 'bg-slate-800 text-slate-400' : 'bg-slate-200 text-slate-600')}>
-                    <User className="w-4 h-4" />
-                  </div>
-                  <div className="text-xs font-medium">Gunakan akun Google lain...</div>
-                </button>
-              </div>
-            ) : (
-              <form onSubmit={e => {
-                e.preventDefault();
-                if (customGoogleEmail) {
-                  handleLinkSocialAccount('google', {
-                    email: customGoogleEmail,
-                    name: customGoogleName || customGoogleEmail.split('@')[0],
-                  });
-                }
-              }} className="space-y-3">
-                <div>
-                  <label className="block text-xs font-medium mb-1">Nama Akun Google</label>
-                  <input
-                    type="text"
-                    placeholder="Nama Anda"
-                    value={customGoogleName}
-                    onChange={e => setCustomGoogleName(e.target.value)}
-                    className={cn('w-full px-3 py-2 rounded-xl text-xs border outline-none', darkMode ? 'bg-slate-900 border-slate-700' : 'bg-slate-50 border-slate-200')}
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium mb-1">Alamat Gmail</label>
-                  <input
-                    type="email"
-                    required
-                    placeholder="user@gmail.com"
-                    value={customGoogleEmail}
-                    onChange={e => setCustomGoogleEmail(e.target.value)}
-                    className={cn('w-full px-3 py-2 rounded-xl text-xs border outline-none', darkMode ? 'bg-slate-900 border-slate-700' : 'bg-slate-50 border-slate-200')}
-                  />
-                </div>
-                <div className="flex gap-2 pt-1">
-                  <button type="button" onClick={() => setShowCustomGoogle(false)} className="flex-1 py-2 rounded-xl text-xs border border-slate-700">Kembali</button>
-                  <button type="submit" disabled={socialLoading || !customGoogleEmail} className="flex-1 py-2 rounded-xl text-xs font-semibold bg-emerald-500 text-white">Tautkan Akun</button>
-                </div>
-              </form>
-            )}
-
-            {socialLoading && (
-              <div className="mt-4 flex items-center justify-center gap-2 text-xs text-emerald-400">
-                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                <span>Menautkan akun Google Anda...</span>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* ────────────────────────────────────────────────────────────────────────── */}
-      {/* 2. FACEBOOK LOGIN & LINK ACCOUNT DIALOG                                    */}
-      {/* ────────────────────────────────────────────────────────────────────────── */}
-      {activeModal === 'FACEBOOK' && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in">
-          <div className={cn(
-            'w-full max-w-sm rounded-3xl border overflow-hidden shadow-2xl relative',
-            darkMode ? 'bg-[#0f1420] border-slate-800 text-slate-100' : 'bg-white border-slate-200 text-slate-900'
-          )}>
-            {/* FB Blue Top Bar */}
-            <div className="bg-[#1877F2] p-4 text-white flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <svg className="w-5 h-5 fill-white" viewBox="0 0 24 24">
-                  <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-2xl bg-white p-2 shadow flex items-center justify-center shrink-0">
+                <svg className="w-6 h-6" viewBox="0 0 24 24">
+                  <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.17z"/>
+                  <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.33 24 12 24z"/>
+                  <path fill="#FBBC05" d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.18 0 10.04 0 12s.45 3.82 1.25 5.42l4.03-3.15z"/>
+                  <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.33 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98z"/>
                 </svg>
-                <span className="font-bold text-sm">Masuk dengan Facebook</span>
               </div>
-              <button onClick={() => setActiveModal('NONE')} className="p-1 rounded text-white/80 hover:text-white">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <div className="p-6">
-              <div className="flex flex-col items-center text-center mb-5">
-                <div className="w-16 h-16 rounded-full bg-slate-800 border-2 border-[#1877F2] flex items-center justify-center text-xl font-bold mb-3 shadow">
-                  👤
-                </div>
-                <h4 className="font-bold text-sm">Masuk ke Finra sebagai Pengguna Facebook?</h4>
-                <p className={cn('text-[11px] mt-1 leading-relaxed', darkMode ? 'text-slate-400' : 'text-slate-500')}>
-                  Finra akan menerima nama publik dan alamat email Anda untuk membuat & menautkan akun.
+              <div>
+                <h3 className="font-bold text-base">Hubungkan ke Halaman Resmi Google</h3>
+                <p className={cn('text-xs', darkMode ? 'text-slate-400' : 'text-slate-500')}>
+                  accounts.google.com OAuth 2.0 Integration
                 </p>
               </div>
+            </div>
 
-              <div className="space-y-2.5">
-                <button
-                  onClick={() => handleLinkSocialAccount('facebook', { email: 'facebook.user@gmail.com', name: 'Pengguna Facebook Terverifikasi' })}
-                  disabled={socialLoading}
-                  className="w-full py-2.5 px-4 rounded-xl text-xs font-semibold bg-[#1877F2] hover:bg-[#166fe5] text-white flex items-center justify-center gap-2 shadow transition active:scale-[0.99]"
-                >
-                  {socialLoading ? (
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                  ) : (
-                    <span>Lanjutkan & Tautkan Akun Facebook</span>
+            <p className={cn('text-xs leading-relaxed mb-4', darkMode ? 'text-slate-300' : 'text-slate-600')}>
+              Sistem telah siap mengarahkan peramban Anda langsung ke <strong>accounts.google.com</strong> untuk memilih akun Google Anda. Agar Google mengizinkan aplikasi lokal (localhost:3000) berkomunikasi secara resmi, Anda cukup memasukkan <strong>OAuth Client ID</strong> dari Google Cloud Console.
+            </p>
+
+            {/* Quick 3-step guide */}
+            <div className={cn('p-3.5 rounded-2xl mb-4 text-xs space-y-2 border', darkMode ? 'bg-slate-900/90 border-slate-800' : 'bg-slate-50 border-slate-200')}>
+              <div className="font-semibold flex items-center gap-1.5 text-emerald-400">
+                <KeyRound className="w-3.5 h-3.5" />
+                <span>Langkah Cepat Mendapatkan Google Client ID:</span>
+              </div>
+              <ol className="list-decimal list-inside space-y-1 text-slate-300 leading-relaxed">
+                <li>Buka <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noreferrer" className="text-emerald-400 underline font-mono">Google Cloud Console &rarr; Credentials</a></li>
+                <li>Buat <strong>OAuth Client ID</strong> &rarr; Application type: <strong>Web application</strong></li>
+                <li>Tambahkan Authorized redirect URI:
+                  <div className="mt-1 p-2 rounded-lg bg-black/40 font-mono text-[11px] text-emerald-300 border border-slate-700/60 select-all">
+                    http://localhost:3000/api/auth/callback/google
+                  </div>
+                </li>
+              </ol>
+            </div>
+
+            {/* Direct Input Form to save credentials into .env.local */}
+            <form onSubmit={handleSaveGoogleCredentials} className="space-y-3">
+              <div>
+                <label className="block text-xs font-medium mb-1">Google Client ID</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Contoh: 123456789-abc.apps.googleusercontent.com"
+                  value={inputGoogleClientId}
+                  onChange={e => setInputGoogleClientId(e.target.value)}
+                  className={cn(
+                    'w-full px-3 py-2 rounded-xl text-xs font-mono border outline-none',
+                    darkMode ? 'bg-slate-900 border-slate-700 text-slate-100 focus:border-emerald-500' : 'bg-slate-50 border-slate-200 text-slate-900'
                   )}
-                </button>
+                />
+              </div>
 
+              <div>
+                <label className="block text-xs font-medium mb-1">Google Client Secret</label>
+                <input
+                  type="password"
+                  required
+                  placeholder="GOCSPX-..."
+                  value={inputGoogleClientSecret}
+                  onChange={e => setInputGoogleClientSecret(e.target.value)}
+                  className={cn(
+                    'w-full px-3 py-2 rounded-xl text-xs font-mono border outline-none',
+                    darkMode ? 'bg-slate-900 border-slate-700 text-slate-100 focus:border-emerald-500' : 'bg-slate-50 border-slate-200 text-slate-900'
+                  )}
+                />
+              </div>
+
+              {oauthSaveSuccess && (
+                <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 shrink-0" />
+                  <span>{oauthSaveSuccess}</span>
+                </div>
+              )}
+
+              <div className="flex gap-2.5 pt-2">
                 <button
                   type="button"
-                  onClick={() => setActiveModal('NONE')}
-                  className={cn('w-full py-2 rounded-xl text-xs font-medium transition', darkMode ? 'text-slate-400 hover:text-slate-200' : 'text-slate-500 hover:text-slate-700')}
+                  onClick={() => setShowGoogleSetupModal(false)}
+                  className={cn(
+                    'flex-1 py-2.5 rounded-xl text-xs font-medium border transition',
+                    darkMode ? 'border-slate-700 text-slate-300 hover:bg-slate-800' : 'border-slate-300 text-slate-700 hover:bg-slate-100'
+                  )}
                 >
-                  Batal
+                  Tutup
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingOAuth || !inputGoogleClientId || !inputGoogleClientSecret}
+                  className="flex-1 py-2.5 rounded-xl text-xs font-semibold bg-emerald-500 hover:bg-emerald-600 text-white flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/25 transition active:scale-[0.99] disabled:opacity-50"
+                >
+                  {savingOAuth ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>Menyimpan...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>Simpan & Buka Halaman Google</span>
+                      <ExternalLink className="w-3.5 h-3.5" />
+                    </>
+                  )}
                 </button>
               </div>
-            </div>
+            </form>
           </div>
         </div>
       )}
 
       {/* ────────────────────────────────────────────────────────────────────────── */}
-      {/* 3. WHATSAPP OTP & MAGIC REGISTRATION LINK DIALOG                           */}
+      {/* FACEBOOK OAUTH CONFIGURATION MODAL                                         */}
       {/* ────────────────────────────────────────────────────────────────────────── */}
-      {activeModal === 'WHATSAPP' && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in">
+      {showFbSetupModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md animate-in fade-in">
+          <div className={cn(
+            'w-full max-w-md rounded-3xl border p-6 shadow-2xl relative',
+            darkMode ? 'bg-[#0f1420] border-slate-800 text-slate-100' : 'bg-white border-slate-200 text-slate-900'
+          )}>
+            <button
+              onClick={() => setShowFbSetupModal(false)}
+              className="absolute top-4 right-4 p-1.5 rounded-lg text-slate-400 hover:text-slate-200"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-2xl bg-[#1877F2] p-2 text-white shadow flex items-center justify-center shrink-0">
+                <svg className="w-6 h-6 fill-white" viewBox="0 0 24 24">
+                  <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
+                </svg>
+              </div>
+              <div>
+                <h3 className="font-bold text-base">Hubungkan OAuth Facebook Resmi</h3>
+                <p className={cn('text-xs', darkMode ? 'text-slate-400' : 'text-slate-500')}>
+                  developers.facebook.com Integration
+                </p>
+              </div>
+            </div>
+
+            <p className={cn('text-xs leading-relaxed mb-4', darkMode ? 'text-slate-300' : 'text-slate-600')}>
+              Untuk login Facebook resmi, tambahkan <strong>FACEBOOK_APP_ID</strong> & <strong>FACEBOOK_APP_SECRET</strong> di file <code>.env.local</code> Anda dari <a href="https://developers.facebook.com" target="_blank" rel="noreferrer" className="text-blue-400 underline">Meta for Developers</a>.
+            </p>
+
+            <button
+              onClick={() => setShowFbSetupModal(false)}
+              className="w-full py-2.5 rounded-xl text-xs font-semibold bg-slate-800 text-white hover:bg-slate-700"
+            >
+              Mengerti
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ────────────────────────────────────────────────────────────────────────── */}
+      {/* WHATSAPP OTP & INSTANT MAGIC REGISTRATION LINK DIALOG                      */}
+      {/* ────────────────────────────────────────────────────────────────────────── */}
+      {showWaModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md animate-in fade-in">
           <div className={cn(
             'w-full max-w-sm rounded-3xl border p-6 shadow-2xl relative',
             darkMode ? 'bg-[#0f1420] border-slate-800 text-slate-100' : 'bg-white border-slate-200 text-slate-900'
           )}>
             <button
-              onClick={() => setActiveModal('NONE')}
+              onClick={() => setShowWaModal(false)}
               className="absolute top-4 right-4 p-1.5 rounded-lg text-slate-400 hover:text-slate-200 transition"
             >
-              <X className="w-4 h-4" />
+              <X className="w-5 h-5" />
             </button>
 
             <div className="flex items-center gap-3 mb-4">
@@ -729,24 +757,22 @@ export default function AuthScreen({ onSuccess, darkMode = true }: AuthScreenPro
             {waStep === 'INPUT' && (
               <form onSubmit={handleSendWaOtp} className="space-y-4">
                 <p className={cn('text-xs leading-relaxed', darkMode ? 'text-slate-400' : 'text-slate-500')}>
-                  Masukkan nomor WhatsApp Anda. Kami akan mengirimkan **kode OTP** dan **tautan ajaib (magic link)** yang langsung membuka akun Anda saat diklik di WA.
+                  Masukkan nomor WhatsApp Anda. Finra akan mengirimkan <strong>kode OTP</strong> dan <strong>tautan ajaib (magic link)</strong> yang langsung membuka & meregistrasi akun Anda saat diklik di chat WhatsApp.
                 </p>
 
                 <div>
                   <label className="block text-xs font-medium mb-1">Nomor WhatsApp</label>
-                  <div className="relative">
-                    <input
-                      type="tel"
-                      required
-                      placeholder="Contoh: 081234567890"
-                      value={waPhone}
-                      onChange={e => setWaPhone(e.target.value)}
-                      className={cn(
-                        'w-full px-3.5 py-2.5 rounded-xl text-sm border outline-none font-mono',
-                        darkMode ? 'bg-slate-900 border-slate-700 text-slate-100' : 'bg-slate-50 border-slate-200 text-slate-900'
-                      )}
-                    />
-                  </div>
+                  <input
+                    type="tel"
+                    required
+                    placeholder="Contoh: 081234567890"
+                    value={waPhone}
+                    onChange={e => setWaPhone(e.target.value)}
+                    className={cn(
+                      'w-full px-3.5 py-2.5 rounded-xl text-sm border outline-none font-mono',
+                      darkMode ? 'bg-slate-900 border-slate-700 text-slate-100' : 'bg-slate-50 border-slate-200 text-slate-900'
+                    )}
+                  />
                 </div>
 
                 <button
@@ -789,7 +815,7 @@ export default function AuthScreen({ onSuccess, darkMode = true }: AuthScreenPro
                       className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500 text-white font-medium text-xs hover:bg-emerald-600 transition"
                     >
                       <ExternalLink className="w-3.5 h-3.5" />
-                      <span>Klik Tautan Ini untuk Masuk Otomatis</span>
+                      <span>Buka Tautan Registrasi Otomatis</span>
                     </a>
                   </div>
                 )}
