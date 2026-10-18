@@ -1,9 +1,12 @@
 import { Resend } from 'resend';
 
-const resendApiKey = process.env.RESEND_API_KEY || '';
-const resend = resendApiKey ? new Resend(resendApiKey) : null;
+function getResend() {
+  const key = process.env.RESEND_API_KEY || '';
+  return key ? new Resend(key) : null;
+}
 
 export async function sendOtpEmail(email: string, otpCode: string): Promise<{ success: boolean; devMode?: boolean; error?: string }> {
+  const resend = getResend();
   // If no Resend API key is configured yet, print to console for dev testing
   if (!resend) {
     console.log('\n======================================================');
