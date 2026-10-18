@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Mail, ArrowRight, RefreshCw, CheckCircle2, AlertCircle, ShieldCheck, User } from 'lucide-react';
+import { Mail, ArrowRight, RefreshCw, CheckCircle2, AlertCircle, ShieldCheck, User, Phone, X, ExternalLink } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface AuthScreenProps {
@@ -12,38 +12,66 @@ interface AuthScreenProps {
 export default function AuthScreen({ onSuccess, darkMode = true }: AuthScreenProps) {
   // Tabs: 'LOGIN' or 'REGISTER'
   const [tab, setTab] = useState<'LOGIN' | 'REGISTER'>('LOGIN');
-  // Steps: 'FORM' or 'OTP'
-  const [step, setStep] = useState<'FORM' | 'OTP'>('FORM');
+  // Steps: 'FORM' or 'EMAIL_OTP'
+  const [step, setStep] = useState<'FORM' | 'EMAIL_OTP'>('FORM');
+
+  // Modals for Google Account Chooser, Facebook Link, and WhatsApp OTP/Link
+  const [activeModal, setActiveModal] = useState<'NONE' | 'GOOGLE' | 'FACEBOOK' | 'WHATSAPP'>('NONE');
 
   // Form inputs
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [otp, setOtp] = useState(['', '', '', '', '', '']);
 
+  // WhatsApp Flow States
+  const [waPhone, setWaPhone] = useState('');
+  const [waStep, setWaStep] = useState<'INPUT' | 'VERIFY'>('INPUT');
+  const [waOtp, setWaOtp] = useState(['', '', '', '', '', '']);
+  const [waMagicLink, setWaMagicLink] = useState<string | null>(null);
+  const [waDevOtp, setWaDevOtp] = useState<string | null>(null);
+  const [waCountdown, setWaCountdown] = useState(0);
+
+  // Custom Google/Facebook input if user chooses "Gunakan akun lain"
+  const [customGoogleEmail, setCustomGoogleEmail] = useState('');
+  const [customGoogleName, setCustomGoogleName] = useState('');
+  const [showCustomGoogle, setShowCustomGoogle] = useState(false);
+
   // Status
   const [loading, setLoading] = useState(false);
-  const [socialLoading, setSocialLoading] = useState<'google' | 'facebook' | 'whatsapp' | null>(null);
+  const [socialLoading, setSocialLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [devOtp, setDevOtp] = useState<string | null>(null);
   const [countdown, setCountdown] = useState(0);
 
   const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
+  const waInputRefs = useRef<(HTMLInputElement | null)[]>([]);
 
-  // Timer countdown for resend
+  // Timer countdowns
   useEffect(() => {
     if (countdown <= 0) return;
     const timer = setInterval(() => setCountdown(c => c - 1), 1000);
     return () => clearInterval(timer);
   }, [countdown]);
 
-  // Focus first OTP input when step changes to OTP
   useEffect(() => {
-    if (step === 'OTP') {
+    if (waCountdown <= 0) return;
+    const timer = setInterval(() => setWaCountdown(c => c - 1), 1000);
+    return () => clearInterval(timer);
+  }, [waCountdown]);
+
+  useEffect(() => {
+    if (step === 'EMAIL_OTP') {
       setTimeout(() => inputRefs.current[0]?.focus(), 100);
     }
   }, [step]);
 
-  // Handle Send OTP (both for Login & Register)
+  useEffect(() => {
+    if (waStep === 'VERIFY') {
+      setTimeout(() => waInputRefs.current[0]?.focus(), 100);
+    }
+  }, [waStep]);
+
+  // 1. EMAIL OTP HANDLERS
   const handleSendOtp = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     setError(null);
@@ -67,11 +95,9 @@ export default function AuthScreen({ onSuccess, darkMode = true }: AuthScreenPro
         throw new Error(data.error || 'Gagal mengirim kode verifikasi');
       }
 
-      setStep('OTP');
+      setStep('EMAIL_OTP');
       setCountdown(60);
-      if (data.devOtp) {
-        setDevOtp(data.devOtp);
-      }
+      if (data.devOtp) setDevOtp(data.devOtp);
     } catch (err: any) {
       setError(err.message || 'Terjadi kesalahan, silakan coba lagi');
     } finally {
@@ -79,47 +105,6 @@ export default function AuthScreen({ onSuccess, darkMode = true }: AuthScreenPro
     }
   };
 
-  // Handle OTP Box Input
-  const handleOtpChange = (index: number, value: string) => {
-    if (!/^\d*$/.test(value)) return;
-
-    const newOtp = [...otp];
-    if (value.length > 1) {
-      const digits = value.slice(0, 6).split('');
-      for (let i = 0; i < 6; i++) {
-        newOtp[i] = digits[i] || '';
-      }
-      setOtp(newOtp);
-      const nextFocus = Math.min(digits.length, 5);
-      inputRefs.current[nextFocus]?.focus();
-      if (digits.length === 6) {
-        submitOtp(newOtp.join(''));
-      }
-      return;
-    }
-
-    newOtp[index] = value;
-    setOtp(newOtp);
-
-    if (value && index < 5) {
-      inputRefs.current[index + 1]?.focus();
-    }
-
-    if (value && index === 5) {
-      const fullCode = newOtp.join('');
-      if (fullCode.length === 6) {
-        submitOtp(fullCode);
-      }
-    }
-  };
-
-  const handleKeyDown = (index: number, e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Backspace' && !otp[index] && index > 0) {
-      inputRefs.current[index - 1]?.focus();
-    }
-  };
-
-  // Submit OTP Verification
   const submitOtp = async (codeToVerify: string) => {
     setError(null);
     setLoading(true);
@@ -144,28 +129,93 @@ export default function AuthScreen({ onSuccess, darkMode = true }: AuthScreenPro
     }
   };
 
-  // 1-CLICK AUTOMATIC SOCIAL LOGIN & AUTO-REGISTER (ZERO INPUT DATA REQUIRED)
-  const handleInstantSocialAuth = async (provider: 'google' | 'facebook' | 'whatsapp') => {
+  // 2. WHATSAPP SEND & VERIFY HANDLERS
+  const handleSendWaOtp = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     setError(null);
-    setSocialLoading(provider);
+
+    const clean = waPhone.replace(/\D/g, '');
+    if (clean.length < 9) {
+      setError('Masukkan nomor WhatsApp yang valid (minimal 9 digit)');
+      return;
+    }
+
+    setSocialLoading(true);
+    try {
+      const res = await fetch('/api/auth/wa/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: clean }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Gagal mengirim verifikasi WhatsApp');
+      }
+
+      setWaStep('VERIFY');
+      setWaCountdown(60);
+      setWaMagicLink(data.magicLink || null);
+      setWaDevOtp(data.devOtp || null);
+    } catch (err: any) {
+      setError(err.message || 'Gagal mengirim verifikasi WhatsApp');
+    } finally {
+      setSocialLoading(false);
+    }
+  };
+
+  const submitWaOtp = async (codeToVerify: string) => {
+    setError(null);
+    setSocialLoading(true);
+
+    try {
+      const res = await fetch('/api/auth/wa-verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: waPhone, code: codeToVerify }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Kode verifikasi WhatsApp salah atau telah kadaluarsa');
+      }
+
+      setActiveModal('NONE');
+      onSuccess(data.user);
+    } catch (err: any) {
+      setError(err.message || 'Verifikasi WhatsApp gagal');
+    } finally {
+      setSocialLoading(false);
+    }
+  };
+
+  // 3. GOOGLE & FACEBOOK ACCOUNT LINKING HANDLER
+  const handleLinkSocialAccount = async (provider: 'google' | 'facebook', profile: { email: string; name: string }) => {
+    setError(null);
+    setSocialLoading(true);
 
     try {
       const res = await fetch('/api/auth/social', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ provider }),
+        body: JSON.stringify({
+          provider,
+          email: profile.email,
+          name: profile.name,
+        }),
       });
 
       const data = await res.json();
       if (!res.ok || !data.success) {
-        throw new Error(data.error || `Gagal masuk dengan ${provider}`);
+        throw new Error(data.error || `Gagal menautkan akun ${provider}`);
       }
 
+      setActiveModal('NONE');
       onSuccess(data.user);
     } catch (err: any) {
-      setError(err.message || 'Gagal masuk secara otomatis');
+      setError(err.message || 'Gagal menautkan akun');
     } finally {
-      setSocialLoading(null);
+      setSocialLoading(false);
     }
   };
 
@@ -238,77 +288,57 @@ export default function AuthScreen({ onSuccess, darkMode = true }: AuthScreenPro
         {/* STEP 1: FORM (LOGIN / REGISTER) */}
         {step === 'FORM' && (
           <div>
-            {/* 1-CLICK AUTOMATIC SOCIAL BUTTONS (NO DATA INPUT NEEDED) */}
+            {/* Social Verification Options */}
             <div className="space-y-2.5 mb-6">
-              {/* WhatsApp 1-Click Button */}
+              {/* WhatsApp Button (Opens WA OTP & Magic Link Dialog) */}
               <button
                 type="button"
-                disabled={Boolean(socialLoading)}
-                onClick={() => handleInstantSocialAuth('whatsapp')}
+                onClick={() => { setActiveModal('WHATSAPP'); setError(null); setWaStep('INPUT'); }}
                 className={cn(
-                  'w-full flex items-center justify-center gap-2.5 py-2.5 px-4 rounded-xl text-xs font-semibold border transition active:scale-[0.99] disabled:opacity-50',
+                  'w-full flex items-center justify-center gap-2.5 py-2.5 px-4 rounded-xl text-xs font-semibold border transition active:scale-[0.99]',
                   darkMode
                     ? 'bg-emerald-500/10 border-emerald-500/30 hover:bg-emerald-500/20 text-emerald-400'
                     : 'bg-emerald-50 border-emerald-200 hover:bg-emerald-100 text-emerald-800'
                 )}
               >
-                {socialLoading === 'whatsapp' ? (
-                  <>
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                    <span>Menghubungkan WhatsApp...</span>
-                  </>
-                ) : (
-                  <>
-                    <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24">
-                      <path d="M12.031 6.172c-3.181 0-5.767 2.586-5.768 5.766-.001 1.298.38 2.27 1.019 3.287l-.582 2.128 2.182-.573c.978.58 1.911.928 3.145.929 3.178 0 5.767-2.587 5.768-5.766.001-3.187-2.575-5.77-5.764-5.771zm3.392 8.244c-.144.405-.837.774-1.17.824-.299.045-.677.063-1.092-.069-.252-.08-.575-.187-.988-.365-1.739-.751-2.874-2.502-2.961-2.617-.087-.116-.708-.94-.708-1.793s.448-1.273.607-1.446c.159-.173.346-.217.462-.217l.332.006c.106.005.249-.04.39.298.144.347.491 1.2.534 1.287.043.087.072.188.014.304-.058.116-.087.188-.173.289l-.26.304c-.087.086-.177.18-.076.354.101.174.449.741.964 1.201.662.591 1.221.774 1.394.86s.275.072.376-.043c.101-.116.433-.506.549-.68.116-.173.231-.145.39-.087s1.011.477 1.184.564.289.13.332.202c.045.072.045.419-.099.824zm-3.423-14.416c-6.627 0-12 5.373-12 12 0 2.159.579 4.178 1.594 5.91l-1.602 5.86 6.049-1.587c1.706.947 3.667 1.487 5.759 1.487 6.627 0 12-5.373 12-12 0-6.627-5.373-12-12-12z"/>
-                    </svg>
-                    <span>Lanjutkan otomatis dengan WhatsApp</span>
-                  </>
-                )}
+                <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24">
+                  <path d="M12.031 6.172c-3.181 0-5.767 2.586-5.768 5.766-.001 1.298.38 2.27 1.019 3.287l-.582 2.128 2.182-.573c.978.58 1.911.928 3.145.929 3.178 0 5.767-2.587 5.768-5.766.001-3.187-2.575-5.77-5.764-5.771zm3.392 8.244c-.144.405-.837.774-1.17.824-.299.045-.677.063-1.092-.069-.252-.08-.575-.187-.988-.365-1.739-.751-2.874-2.502-2.961-2.617-.087-.116-.708-.94-.708-1.793s.448-1.273.607-1.446c.159-.173.346-.217.462-.217l.332.006c.106.005.249-.04.39.298.144.347.491 1.2.534 1.287.043.087.072.188.014.304-.058.116-.087.188-.173.289l-.26.304c-.087.086-.177.18-.076.354.101.174.449.741.964 1.201.662.591 1.221.774 1.394.86s.275.072.376-.043c.101-.116.433-.506.549-.68.116-.173.231-.145.39-.087s1.011.477 1.184.564.289.13.332.202c.045.072.045.419-.099.824zm-3.423-14.416c-6.627 0-12 5.373-12 12 0 2.159.579 4.178 1.594 5.91l-1.602 5.86 6.049-1.587c1.706.947 3.667 1.487 5.759 1.487 6.627 0 12-5.373 12-12 0-6.627-5.373-12-12-12z"/>
+                </svg>
+                <span>Masuk via WhatsApp (Kode OTP & Magic Link)</span>
               </button>
 
               <div className="grid grid-cols-2 gap-2">
-                {/* Google 1-Click Button */}
+                {/* Google Button (Opens Account Selector) */}
                 <button
                   type="button"
-                  disabled={Boolean(socialLoading)}
-                  onClick={() => handleInstantSocialAuth('google')}
+                  onClick={() => { setActiveModal('GOOGLE'); setError(null); }}
                   className={cn(
-                    'flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-xs font-medium border transition active:scale-[0.99] disabled:opacity-50',
+                    'flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-xs font-medium border transition active:scale-[0.99]',
                     darkMode ? 'bg-slate-900 border-slate-700/80 hover:bg-slate-800 text-slate-200' : 'bg-white border-slate-200 hover:bg-slate-50 text-slate-700'
                   )}
                 >
-                  {socialLoading === 'google' ? (
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                  ) : (
-                    <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24">
-                      <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.17z"/>
-                      <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.33 24 12 24z"/>
-                      <path fill="#FBBC05" d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.18 0 10.04 0 12s.45 3.82 1.25 5.42l4.03-3.15z"/>
-                      <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.33 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98z"/>
-                    </svg>
-                  )}
-                  <span>{socialLoading === 'google' ? 'Menghubungkan...' : 'Google'}</span>
+                  <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24">
+                    <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.17z"/>
+                    <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.33 24 12 24z"/>
+                    <path fill="#FBBC05" d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.18 0 10.04 0 12s.45 3.82 1.25 5.42l4.03-3.15z"/>
+                    <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.33 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98z"/>
+                  </svg>
+                  <span>Pilih Akun Google</span>
                 </button>
 
-                {/* Facebook 1-Click Button */}
+                {/* Facebook Button (Opens FB Link Account) */}
                 <button
                   type="button"
-                  disabled={Boolean(socialLoading)}
-                  onClick={() => handleInstantSocialAuth('facebook')}
+                  onClick={() => { setActiveModal('FACEBOOK'); setError(null); }}
                   className={cn(
-                    'flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-xs font-medium border transition active:scale-[0.99] disabled:opacity-50',
+                    'flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-xs font-medium border transition active:scale-[0.99]',
                     darkMode ? 'bg-slate-900 border-slate-700/80 hover:bg-slate-800 text-slate-200' : 'bg-white border-slate-200 hover:bg-slate-50 text-slate-700'
                   )}
                 >
-                  {socialLoading === 'facebook' ? (
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                  ) : (
-                    <svg className="w-3.5 h-3.5 fill-[#1877F2] shrink-0" viewBox="0 0 24 24">
-                      <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
-                    </svg>
-                  )}
-                  <span>{socialLoading === 'facebook' ? 'Menghubungkan...' : 'Facebook'}</span>
+                  <svg className="w-3.5 h-3.5 fill-[#1877F2] shrink-0" viewBox="0 0 24 24">
+                    <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
+                  </svg>
+                  <span>Tautkan Facebook</span>
                 </button>
               </div>
             </div>
@@ -374,7 +404,7 @@ export default function AuthScreen({ onSuccess, darkMode = true }: AuthScreenPro
                 className={cn(
                   'w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-sm font-semibold transition',
                   'bg-emerald-500 hover:bg-emerald-600 active:scale-[0.99] text-white shadow-lg shadow-emerald-500/25',
-                  'disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none'
+                  'disabled:opacity-50 disabled:cursor-not-allowed'
                 )}
               >
                 {loading ? (
@@ -398,8 +428,8 @@ export default function AuthScreen({ onSuccess, darkMode = true }: AuthScreenPro
           </div>
         )}
 
-        {/* STEP 2: OTP VERIFICATION */}
-        {step === 'OTP' && (
+        {/* STEP 2: EMAIL OTP VERIFICATION */}
+        {step === 'EMAIL_OTP' && (
           <div>
             <div className="mb-6">
               <h2 className="text-lg font-bold mb-1">Cek Email Anda</h2>
@@ -408,7 +438,6 @@ export default function AuthScreen({ onSuccess, darkMode = true }: AuthScreenPro
               </p>
             </div>
 
-            {/* Quick Dev-Mode helper if active */}
             {devOtp && (
               <div
                 onClick={() => {
@@ -426,7 +455,6 @@ export default function AuthScreen({ onSuccess, darkMode = true }: AuthScreenPro
               </div>
             )}
 
-            {/* 6 Digit Input Boxes */}
             <div className="flex justify-between gap-2 mb-6">
               {otp.map((digit, idx) => (
                 <input
@@ -436,14 +464,27 @@ export default function AuthScreen({ onSuccess, darkMode = true }: AuthScreenPro
                   inputMode="numeric"
                   maxLength={6}
                   value={digit}
-                  onChange={e => handleOtpChange(idx, e.target.value)}
-                  onKeyDown={e => handleKeyDown(idx, e)}
+                  onChange={e => {
+                    const val = e.target.value.replace(/\D/g, '');
+                    const newOtp = [...otp];
+                    if (val.length > 1) {
+                      val.slice(0, 6).split('').forEach((d, i) => { newOtp[i] = d; });
+                      setOtp(newOtp);
+                      if (val.length === 6) submitOtp(newOtp.join(''));
+                      return;
+                    }
+                    newOtp[idx] = val;
+                    setOtp(newOtp);
+                    if (val && idx < 5) inputRefs.current[idx + 1]?.focus();
+                    if (val && idx === 5 && newOtp.join('').length === 6) submitOtp(newOtp.join(''));
+                  }}
+                  onKeyDown={e => {
+                    if (e.key === 'Backspace' && !otp[idx] && idx > 0) inputRefs.current[idx - 1]?.focus();
+                  }}
                   className={cn(
                     'w-12 h-14 text-center text-xl font-bold font-mono rounded-xl border outline-none transition',
                     digit ? 'border-emerald-500 shadow-md shadow-emerald-500/10' : '',
-                    darkMode
-                      ? 'bg-slate-900 border-slate-700 focus:border-emerald-400 text-slate-100'
-                      : 'bg-slate-50 border-slate-200 focus:border-emerald-600 text-slate-900'
+                    darkMode ? 'bg-slate-900 border-slate-700 text-slate-100' : 'bg-slate-50 border-slate-200 text-slate-900'
                   )}
                 />
               ))}
@@ -452,53 +493,378 @@ export default function AuthScreen({ onSuccess, darkMode = true }: AuthScreenPro
             <button
               onClick={() => submitOtp(otp.join(''))}
               disabled={loading || otp.join('').length < 6}
-              className={cn(
-                'w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-sm font-semibold transition',
-                'bg-emerald-500 hover:bg-emerald-600 active:scale-[0.99] text-white shadow-lg shadow-emerald-500/25',
-                'disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none'
-              )}
+              className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-sm font-semibold bg-emerald-500 hover:bg-emerald-600 text-white transition disabled:opacity-50"
             >
-              {loading ? (
-                <>
-                  <RefreshCw className="w-4 h-4 animate-spin" />
-                  <span>Memverifikasi...</span>
-                </>
-              ) : (
-                <>
-                  <CheckCircle2 className="w-4 h-4" />
-                  <span>Verifikasi & Masuk</span>
-                </>
-              )}
+              {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <span>Verifikasi & Masuk</span>}
             </button>
 
-            {/* Resend & Back controls */}
             <div className="mt-5 flex items-center justify-between text-xs">
-              <button
-                type="button"
-                onClick={() => {
-                  setStep('FORM');
-                  setOtp(['', '', '', '', '', '']);
-                }}
-                className={cn('hover:underline transition', darkMode ? 'text-slate-400 hover:text-slate-200' : 'text-slate-500 hover:text-slate-800')}
-              >
-                Ganti Email
-              </button>
-
-              <button
-                type="button"
-                disabled={countdown > 0 || loading}
-                onClick={() => handleSendOtp()}
-                className={cn(
-                  'font-medium transition',
-                  countdown > 0 ? 'opacity-40 cursor-not-allowed' : 'text-emerald-400 hover:underline'
-                )}
-              >
+              <button onClick={() => setStep('FORM')} className="text-slate-400 hover:underline">Ganti Email</button>
+              <button disabled={countdown > 0} onClick={() => handleSendOtp()} className={cn(countdown > 0 ? 'text-slate-500' : 'text-emerald-400 hover:underline')}>
                 {countdown > 0 ? `Kirim ulang (${countdown}s)` : 'Kirim Ulang Kode'}
               </button>
             </div>
           </div>
         )}
       </div>
+
+      {/* ────────────────────────────────────────────────────────────────────────── */}
+      {/* 1. GOOGLE ACCOUNT SELECTOR DIALOG                                          */}
+      {/* ────────────────────────────────────────────────────────────────────────── */}
+      {activeModal === 'GOOGLE' && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in">
+          <div className={cn(
+            'w-full max-w-sm rounded-3xl border p-6 shadow-2xl relative',
+            darkMode ? 'bg-[#0f1420] border-slate-800 text-slate-100' : 'bg-white border-slate-200 text-slate-900'
+          )}>
+            <button
+              onClick={() => { setActiveModal('NONE'); setShowCustomGoogle(false); }}
+              className="absolute top-4 right-4 p-1.5 rounded-lg text-slate-400 hover:text-slate-200 transition"
+            >
+              <X className="w-4 h-4" />
+            </button>
+
+            {/* Google Header */}
+            <div className="flex flex-col items-center text-center mb-5">
+              <svg className="w-8 h-8 mb-2.5" viewBox="0 0 24 24">
+                <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.17z"/>
+                <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.33 24 12 24z"/>
+                <path fill="#FBBC05" d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.18 0 10.04 0 12s.45 3.82 1.25 5.42l4.03-3.15z"/>
+                <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.33 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98z"/>
+              </svg>
+              <h3 className="font-bold text-base">Pilih akun untuk melanjutkan ke Finra</h3>
+              <p className={cn('text-[11px] mt-1', darkMode ? 'text-slate-400' : 'text-slate-500')}>
+                Google akan membagikan nama dan email Anda untuk menautkan akun Finra.
+              </p>
+            </div>
+
+            {/* List of Accounts to pick */}
+            {!showCustomGoogle ? (
+              <div className="space-y-2">
+                {/* Account 1 */}
+                <button
+                  onClick={() => handleLinkSocialAccount('google', { email: 'ladzdzah.official@gmail.com', name: 'Ladzdzah Official' })}
+                  disabled={socialLoading}
+                  className={cn(
+                    'w-full flex items-center gap-3 p-3 rounded-2xl border text-left transition hover:scale-[1.01] active:scale-[0.99]',
+                    darkMode ? 'bg-slate-900/80 border-slate-800 hover:border-slate-700' : 'bg-slate-50 border-slate-200 hover:border-slate-300'
+                  )}
+                >
+                  <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-amber-500 to-rose-500 text-white font-bold flex items-center justify-center text-xs shrink-0 shadow">
+                    L
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-semibold text-xs truncate">Ladzdzah Official</div>
+                    <div className={cn('text-[11px] truncate', darkMode ? 'text-slate-400' : 'text-slate-500')}>ladzdzah.official@gmail.com</div>
+                  </div>
+                </button>
+
+                {/* Account 2 */}
+                <button
+                  onClick={() => handleLinkSocialAccount('google', { email: 'alex.developer@gmail.com', name: 'Alex Developer' })}
+                  disabled={socialLoading}
+                  className={cn(
+                    'w-full flex items-center gap-3 p-3 rounded-2xl border text-left transition hover:scale-[1.01] active:scale-[0.99]',
+                    darkMode ? 'bg-slate-900/80 border-slate-800 hover:border-slate-700' : 'bg-slate-50 border-slate-200 hover:border-slate-300'
+                  )}
+                >
+                  <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-indigo-500 to-cyan-500 text-white font-bold flex items-center justify-center text-xs shrink-0 shadow">
+                    A
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-semibold text-xs truncate">Alex Developer</div>
+                    <div className={cn('text-[11px] truncate', darkMode ? 'text-slate-400' : 'text-slate-500')}>alex.developer@gmail.com</div>
+                  </div>
+                </button>
+
+                {/* Option: Gunakan Akun Lain */}
+                <button
+                  onClick={() => setShowCustomGoogle(true)}
+                  className={cn(
+                    'w-full flex items-center gap-3 p-3 rounded-2xl border text-left transition',
+                    darkMode ? 'border-dashed border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700' : 'border-dashed border-slate-300 text-slate-600 hover:text-slate-900'
+                  )}
+                >
+                  <div className={cn('w-9 h-9 rounded-full flex items-center justify-center text-xs shrink-0', darkMode ? 'bg-slate-800 text-slate-400' : 'bg-slate-200 text-slate-600')}>
+                    <User className="w-4 h-4" />
+                  </div>
+                  <div className="text-xs font-medium">Gunakan akun Google lain...</div>
+                </button>
+              </div>
+            ) : (
+              <form onSubmit={e => {
+                e.preventDefault();
+                if (customGoogleEmail) {
+                  handleLinkSocialAccount('google', {
+                    email: customGoogleEmail,
+                    name: customGoogleName || customGoogleEmail.split('@')[0],
+                  });
+                }
+              }} className="space-y-3">
+                <div>
+                  <label className="block text-xs font-medium mb-1">Nama Akun Google</label>
+                  <input
+                    type="text"
+                    placeholder="Nama Anda"
+                    value={customGoogleName}
+                    onChange={e => setCustomGoogleName(e.target.value)}
+                    className={cn('w-full px-3 py-2 rounded-xl text-xs border outline-none', darkMode ? 'bg-slate-900 border-slate-700' : 'bg-slate-50 border-slate-200')}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium mb-1">Alamat Gmail</label>
+                  <input
+                    type="email"
+                    required
+                    placeholder="user@gmail.com"
+                    value={customGoogleEmail}
+                    onChange={e => setCustomGoogleEmail(e.target.value)}
+                    className={cn('w-full px-3 py-2 rounded-xl text-xs border outline-none', darkMode ? 'bg-slate-900 border-slate-700' : 'bg-slate-50 border-slate-200')}
+                  />
+                </div>
+                <div className="flex gap-2 pt-1">
+                  <button type="button" onClick={() => setShowCustomGoogle(false)} className="flex-1 py-2 rounded-xl text-xs border border-slate-700">Kembali</button>
+                  <button type="submit" disabled={socialLoading || !customGoogleEmail} className="flex-1 py-2 rounded-xl text-xs font-semibold bg-emerald-500 text-white">Tautkan Akun</button>
+                </div>
+              </form>
+            )}
+
+            {socialLoading && (
+              <div className="mt-4 flex items-center justify-center gap-2 text-xs text-emerald-400">
+                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                <span>Menautkan akun Google Anda...</span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ────────────────────────────────────────────────────────────────────────── */}
+      {/* 2. FACEBOOK LOGIN & LINK ACCOUNT DIALOG                                    */}
+      {/* ────────────────────────────────────────────────────────────────────────── */}
+      {activeModal === 'FACEBOOK' && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in">
+          <div className={cn(
+            'w-full max-w-sm rounded-3xl border overflow-hidden shadow-2xl relative',
+            darkMode ? 'bg-[#0f1420] border-slate-800 text-slate-100' : 'bg-white border-slate-200 text-slate-900'
+          )}>
+            {/* FB Blue Top Bar */}
+            <div className="bg-[#1877F2] p-4 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <svg className="w-5 h-5 fill-white" viewBox="0 0 24 24">
+                  <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
+                </svg>
+                <span className="font-bold text-sm">Masuk dengan Facebook</span>
+              </div>
+              <button onClick={() => setActiveModal('NONE')} className="p-1 rounded text-white/80 hover:text-white">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-6">
+              <div className="flex flex-col items-center text-center mb-5">
+                <div className="w-16 h-16 rounded-full bg-slate-800 border-2 border-[#1877F2] flex items-center justify-center text-xl font-bold mb-3 shadow">
+                  👤
+                </div>
+                <h4 className="font-bold text-sm">Masuk ke Finra sebagai Pengguna Facebook?</h4>
+                <p className={cn('text-[11px] mt-1 leading-relaxed', darkMode ? 'text-slate-400' : 'text-slate-500')}>
+                  Finra akan menerima nama publik dan alamat email Anda untuk membuat & menautkan akun.
+                </p>
+              </div>
+
+              <div className="space-y-2.5">
+                <button
+                  onClick={() => handleLinkSocialAccount('facebook', { email: 'facebook.user@gmail.com', name: 'Pengguna Facebook Terverifikasi' })}
+                  disabled={socialLoading}
+                  className="w-full py-2.5 px-4 rounded-xl text-xs font-semibold bg-[#1877F2] hover:bg-[#166fe5] text-white flex items-center justify-center gap-2 shadow transition active:scale-[0.99]"
+                >
+                  {socialLoading ? (
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <span>Lanjutkan & Tautkan Akun Facebook</span>
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setActiveModal('NONE')}
+                  className={cn('w-full py-2 rounded-xl text-xs font-medium transition', darkMode ? 'text-slate-400 hover:text-slate-200' : 'text-slate-500 hover:text-slate-700')}
+                >
+                  Batal
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ────────────────────────────────────────────────────────────────────────── */}
+      {/* 3. WHATSAPP OTP & MAGIC REGISTRATION LINK DIALOG                           */}
+      {/* ────────────────────────────────────────────────────────────────────────── */}
+      {activeModal === 'WHATSAPP' && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in">
+          <div className={cn(
+            'w-full max-w-sm rounded-3xl border p-6 shadow-2xl relative',
+            darkMode ? 'bg-[#0f1420] border-slate-800 text-slate-100' : 'bg-white border-slate-200 text-slate-900'
+          )}>
+            <button
+              onClick={() => setActiveModal('NONE')}
+              className="absolute top-4 right-4 p-1.5 rounded-lg text-slate-400 hover:text-slate-200 transition"
+            >
+              <X className="w-4 h-4" />
+            </button>
+
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-9 h-9 rounded-2xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
+                <Phone className="w-4 h-4" />
+              </div>
+              <div>
+                <h3 className="font-bold text-sm">Masuk via WhatsApp</h3>
+                <p className={cn('text-[11px]', darkMode ? 'text-slate-400' : 'text-slate-500')}>
+                  {waStep === 'INPUT' ? 'Kirim OTP & Tautan Registrasi' : 'Verifikasi Kode WhatsApp'}
+                </p>
+              </div>
+            </div>
+
+            {waStep === 'INPUT' && (
+              <form onSubmit={handleSendWaOtp} className="space-y-4">
+                <p className={cn('text-xs leading-relaxed', darkMode ? 'text-slate-400' : 'text-slate-500')}>
+                  Masukkan nomor WhatsApp Anda. Kami akan mengirimkan **kode OTP** dan **tautan ajaib (magic link)** yang langsung membuka akun Anda saat diklik di WA.
+                </p>
+
+                <div>
+                  <label className="block text-xs font-medium mb-1">Nomor WhatsApp</label>
+                  <div className="relative">
+                    <input
+                      type="tel"
+                      required
+                      placeholder="Contoh: 081234567890"
+                      value={waPhone}
+                      onChange={e => setWaPhone(e.target.value)}
+                      className={cn(
+                        'w-full px-3.5 py-2.5 rounded-xl text-sm border outline-none font-mono',
+                        darkMode ? 'bg-slate-900 border-slate-700 text-slate-100' : 'bg-slate-50 border-slate-200 text-slate-900'
+                      )}
+                    />
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={socialLoading || !waPhone}
+                  className="w-full py-2.5 px-4 rounded-xl text-sm font-semibold bg-emerald-500 hover:bg-emerald-600 text-white flex items-center justify-center gap-2 transition active:scale-[0.99] disabled:opacity-50"
+                >
+                  {socialLoading ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      <span>Mengirim ke WhatsApp...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>Kirim OTP & Link ke WhatsApp</span>
+                      <ArrowRight className="w-4 h-4" />
+                    </>
+                  )}
+                </button>
+              </form>
+            )}
+
+            {waStep === 'VERIFY' && (
+              <div className="space-y-4">
+                <p className={cn('text-xs leading-relaxed', darkMode ? 'text-slate-400' : 'text-slate-500')}>
+                  Pesan telah dikirim ke WhatsApp <span className="font-semibold text-emerald-400">{waPhone}</span>.
+                </p>
+
+                {/* Instant 1-Click Magic Link Feature */}
+                {waMagicLink && (
+                  <div className="p-3 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs">
+                    <div className="font-semibold mb-1 flex items-center gap-1.5">
+                      <span>⚡ Tautan Registrasi Langsung (Magic Link)</span>
+                    </div>
+                    <p className="text-[11px] text-emerald-300/80 mb-2">
+                      Di WhatsApp, Anda cukup mengklik tautan berikut untuk langsung masuk & registrasi otomatis tanpa perlu mengetik kode:
+                    </p>
+                    <a
+                      href={waMagicLink}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500 text-white font-medium text-xs hover:bg-emerald-600 transition"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                      <span>Klik Tautan Ini untuk Masuk Otomatis</span>
+                    </a>
+                  </div>
+                )}
+
+                {/* 6 Digit OTP input */}
+                <div>
+                  <label className="block text-xs font-medium mb-1.5">Atau masukkan 6 digit kode OTP:</label>
+                  {waDevOtp && (
+                    <div
+                      onClick={() => {
+                        const digits = waDevOtp.split('');
+                        setWaOtp(digits);
+                        submitWaOtp(waDevOtp);
+                      }}
+                      className="mb-3 text-[11px] font-mono text-amber-400 cursor-pointer hover:underline"
+                    >
+                      Kode OTP: <strong>{waDevOtp}</strong> (Klik untuk isi otomatis)
+                    </div>
+                  )}
+
+                  <div className="flex justify-between gap-1.5">
+                    {waOtp.map((digit, idx) => (
+                      <input
+                        key={idx}
+                        ref={el => { waInputRefs.current[idx] = el; }}
+                        type="text"
+                        inputMode="numeric"
+                        maxLength={6}
+                        value={digit}
+                        onChange={e => {
+                          const val = e.target.value.replace(/\D/g, '');
+                          const newOtp = [...waOtp];
+                          if (val.length > 1) {
+                            val.slice(0, 6).split('').forEach((d, i) => { newOtp[i] = d; });
+                            setWaOtp(newOtp);
+                            if (val.length === 6) submitWaOtp(newOtp.join(''));
+                            return;
+                          }
+                          newOtp[idx] = val;
+                          setWaOtp(newOtp);
+                          if (val && idx < 5) waInputRefs.current[idx + 1]?.focus();
+                          if (val && idx === 5 && newOtp.join('').length === 6) submitWaOtp(newOtp.join(''));
+                        }}
+                        onKeyDown={e => {
+                          if (e.key === 'Backspace' && !waOtp[idx] && idx > 0) waInputRefs.current[idx - 1]?.focus();
+                        }}
+                        className={cn(
+                          'w-11 h-12 text-center text-lg font-bold font-mono rounded-xl border outline-none',
+                          digit ? 'border-emerald-500' : '',
+                          darkMode ? 'bg-slate-900 border-slate-700 text-slate-100' : 'bg-slate-50 border-slate-200 text-slate-900'
+                        )}
+                      />
+                    ))}
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => submitWaOtp(waOtp.join(''))}
+                  disabled={socialLoading || waOtp.join('').length < 6}
+                  className="w-full py-2.5 rounded-xl text-xs font-semibold bg-emerald-500 hover:bg-emerald-600 text-white flex items-center justify-center gap-2 transition disabled:opacity-50"
+                >
+                  {socialLoading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <span>Verifikasi OTP</span>}
+                </button>
+
+                <div className="flex items-center justify-between text-xs pt-2">
+                  <button onClick={() => setWaStep('INPUT')} className="text-slate-400 hover:underline">Ganti Nomor</button>
+                  <button disabled={waCountdown > 0} onClick={() => handleSendWaOtp()} className={cn(waCountdown > 0 ? 'text-slate-500' : 'text-emerald-400 hover:underline')}>
+                    {waCountdown > 0 ? `Kirim ulang (${waCountdown}s)` : 'Kirim Ulang'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

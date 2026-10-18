@@ -29,6 +29,8 @@ declare global {
   // eslint-disable-next-line no-var
   var __GLOBAL_OTPS__: Map<string, { code: string; expiresAt: number }> | undefined;
   // eslint-disable-next-line no-var
+  var __GLOBAL_WA_TOKENS__: Map<string, { phone: string; code: string; expiresAt: number }> | undefined;
+  // eslint-disable-next-line no-var
   var __GLOBAL_USERS__: Map<string, { id: string; email: string; name?: string }> | undefined;
 }
 
@@ -37,6 +39,9 @@ if (!global.__GLOBAL_TRANSACTIONS__) {
 }
 if (!global.__GLOBAL_OTPS__) {
   global.__GLOBAL_OTPS__ = new Map();
+}
+if (!global.__GLOBAL_WA_TOKENS__) {
+  global.__GLOBAL_WA_TOKENS__ = new Map();
 }
 if (!global.__GLOBAL_USERS__) {
   global.__GLOBAL_USERS__ = new Map();
@@ -85,6 +90,8 @@ async function ensureTableExists(sql: NeonQueryFunction<false, false>) {
       CREATE TABLE IF NOT EXISTS auth_otps (
         email TEXT PRIMARY KEY,
         code TEXT NOT NULL,
+        token TEXT,
+        phone TEXT,
         expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       );
@@ -97,7 +104,7 @@ async function ensureTableExists(sql: NeonQueryFunction<false, false>) {
 }
 
 // ============================================================================
-// AUTH QUERIES
+// AUTH QUERIES (EMAIL OTP)
 // ============================================================================
 
 export async function saveOtp(email: string, code: string, expiresAt: Date): Promise<void> {
@@ -139,21 +146,19 @@ export async function verifyAndConsumeOtp(email: string, code: string): Promise<
         const stored = rows[0];
         const expiry = new Date(stored.expires_at);
         if (stored.code === cleanCode && expiry > now) {
-          // Valid! Consume from both DB and memory
           await sql`DELETE FROM auth_otps WHERE email = ${normEmail}`;
           global.__GLOBAL_OTPS__?.delete(normEmail);
           return true;
         }
         return false;
       }
-      // If sql succeeded but no row found, it's either consumed or not found
       return false;
     } catch (err: any) {
       console.warn('[Neon DB] Verify OTP error, falling back to local cache:', err?.message);
     }
   }
 
-  // Fallback to in-memory only if DB was not reachable
+  // Fallback to in-memory
   const cached = global.__GLOBAL_OTPS__?.get(normEmail);
   if (cached && cached.code === cleanCode && cached.expiresAt > Date.now()) {
     global.__GLOBAL_OTPS__?.delete(normEmail);
@@ -163,9 +168,119 @@ export async function verifyAndConsumeOtp(email: string, code: string): Promise<
   return false;
 }
 
-export async function getOrCreateUser(email: string): Promise<{ id: string; email: string; name?: string }> {
+// ============================================================================
+// WHATSAPP OTP & MAGIC LINK QUERIES
+// ============================================================================
+
+export async function saveWaVerification(phone: string, code: string, token: string, expiresAt: Date): Promise<void> {
+  const cleanPhone = phone.replace(/\D/g, '');
+  global.__GLOBAL_WA_TOKENS__?.set(token, { phone: cleanPhone, code, expiresAt: expiresAt.getTime() });
+  global.__GLOBAL_WA_TOKENS__?.set(`phone:${cleanPhone}`, { phone: cleanPhone, code, expiresAt: expiresAt.getTime() });
+
+  const sql = getNeonSql();
+  if (sql) {
+    try {
+      await ensureTableExists(sql);
+      const waKey = `wa:${cleanPhone}`;
+      await sql`
+        INSERT INTO auth_otps (email, code, token, phone, expires_at)
+        VALUES (${waKey}, ${code}, ${token}, ${cleanPhone}, ${expiresAt.toISOString()})
+        ON CONFLICT (email)
+        DO UPDATE SET code = ${code}, token = ${token}, phone = ${cleanPhone}, expires_at = ${expiresAt.toISOString()}, created_at = NOW()
+      `;
+    } catch (err: any) {
+      console.error('[Neon DB] Save WA verification error:', err?.message);
+    }
+  }
+}
+
+export async function verifyAndConsumeWaToken(token: string): Promise<{ valid: boolean; phone?: string }> {
+  const now = new Date();
+
+  const sql = getNeonSql();
+  if (sql) {
+    try {
+      await ensureTableExists(sql);
+      const rows = await sql`
+        SELECT phone, expires_at FROM auth_otps
+        WHERE token = ${token}
+      `;
+
+      if (rows && rows.length > 0) {
+        const stored = rows[0];
+        const expiry = new Date(stored.expires_at);
+        if (expiry > now && stored.phone) {
+          await sql`DELETE FROM auth_otps WHERE token = ${token}`;
+          global.__GLOBAL_WA_TOKENS__?.delete(token);
+          global.__GLOBAL_WA_TOKENS__?.delete(`phone:${stored.phone}`);
+          return { valid: true, phone: stored.phone };
+        }
+        return { valid: false };
+      }
+    } catch (err: any) {
+      console.warn('[Neon DB] Verify WA token error, checking local cache:', err?.message);
+    }
+  }
+
+  // Memory fallback
+  const cached = global.__GLOBAL_WA_TOKENS__?.get(token);
+  if (cached && cached.expiresAt > Date.now()) {
+    global.__GLOBAL_WA_TOKENS__?.delete(token);
+    global.__GLOBAL_WA_TOKENS__?.delete(`phone:${cached.phone}`);
+    return { valid: true, phone: cached.phone };
+  }
+
+  return { valid: false };
+}
+
+export async function verifyAndConsumeWaOtp(phone: string, code: string): Promise<boolean> {
+  const cleanPhone = phone.replace(/\D/g, '');
+  const cleanCode = code.trim();
+  const now = new Date();
+
+  const sql = getNeonSql();
+  if (sql) {
+    try {
+      await ensureTableExists(sql);
+      const waKey = `wa:${cleanPhone}`;
+      const rows = await sql`
+        SELECT code, expires_at FROM auth_otps
+        WHERE email = ${waKey}
+      `;
+
+      if (rows && rows.length > 0) {
+        const stored = rows[0];
+        const expiry = new Date(stored.expires_at);
+        if (stored.code === cleanCode && expiry > now) {
+          await sql`DELETE FROM auth_otps WHERE email = ${waKey}`;
+          global.__GLOBAL_WA_TOKENS__?.delete(`phone:${cleanPhone}`);
+          return true;
+        }
+        return false;
+      }
+      return false;
+    } catch (err: any) {
+      console.warn('[Neon DB] Verify WA OTP error:', err?.message);
+    }
+  }
+
+  const cached = global.__GLOBAL_WA_TOKENS__?.get(`phone:${cleanPhone}`);
+  if (cached && cached.code === cleanCode && cached.expiresAt > Date.now()) {
+    global.__GLOBAL_WA_TOKENS__?.delete(`phone:${cleanPhone}`);
+    return true;
+  }
+
+  return false;
+}
+
+// ============================================================================
+// USER MANAGEMENT
+// ============================================================================
+
+export async function getOrCreateUser(email: string, initialName?: string): Promise<{ id: string; email: string; name?: string }> {
   const normEmail = email.toLowerCase().trim();
   const fallbackId = `user-${Date.now().toString(36)}`;
+  const defaultName = initialName || normEmail.split('@')[0];
 
   const sql = getNeonSql();
   if (sql) {
@@ -179,12 +294,11 @@ export async function getOrCreateUser(email: string): Promise<{ id: string; emai
 
       // Create new user
       const newId = `usr_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-      const name = normEmail.split('@')[0];
       await sql`
         INSERT INTO users (id, email, name)
-        VALUES (${newId}, ${normEmail}, ${name})
+        VALUES (${newId}, ${normEmail}, ${defaultName})
       `;
-      return { id: newId, email: normEmail, name };
+      return { id: newId, email: normEmail, name: defaultName };
     } catch (err: any) {
       console.warn('[Neon DB] getOrCreateUser error, falling back to memory:', err?.message);
     }
@@ -192,7 +306,7 @@ export async function getOrCreateUser(email: string): Promise<{ id: string; emai
 
   let user = global.__GLOBAL_USERS__?.get(normEmail);
   if (!user) {
-    user = { id: fallbackId, email: normEmail, name: normEmail.split('@')[0] };
+    user = { id: fallbackId, email: normEmail, name: defaultName };
     global.__GLOBAL_USERS__?.set(normEmail, user);
   }
   return user;
