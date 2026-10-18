@@ -2,20 +2,23 @@ import { neon, NeonQueryFunction } from '@neondatabase/serverless';
 import { Transaction } from './types';
 import { INITIAL_TRANSACTIONS } from './data';
 
-const connectionString =
-  process.env.DATABASE_URL ||
-  process.env.POSTGRES_URL ||
-  process.env.POSTGRES_PRISMA_URL ||
-  '';
+// Helper to get neon client dynamically using environment variables
+export function getNeonSql(): NeonQueryFunction<false, false> | null {
+  const connectionString =
+    process.env.DATABASE_URL ||
+    process.env.DATABASE_URL_UNPOOLED ||
+    process.env.POSTGRES_URL ||
+    '';
 
-export const isDbConfigured = Boolean(connectionString && connectionString.startsWith('postgres'));
+  if (!connectionString || (!connectionString.startsWith('postgres://') && !connectionString.startsWith('postgresql://'))) {
+    return null;
+  }
 
-let sqlClient: NeonQueryFunction<false, false> | null = null;
-if (isDbConfigured) {
   try {
-    sqlClient = neon(connectionString);
+    return neon(connectionString);
   } catch (err) {
     console.warn('[Neon DB] Initialization error:', err);
+    return null;
   }
 }
 
@@ -61,10 +64,11 @@ async function ensureTableExists(sql: NeonQueryFunction<false, false>) {
 }
 
 export async function getTransactions(): Promise<Transaction[]> {
-  if (isDbConfigured && sqlClient) {
+  const sql = getNeonSql();
+  if (sql) {
     try {
-      await ensureTableExists(sqlClient);
-      const rows = await sqlClient`
+      await ensureTableExists(sql);
+      const rows = await sql`
         SELECT 
           id, type, CAST(amount AS DOUBLE PRECISION) as amount, currency, 
           date, merchant, description, category, subcategory, 
@@ -99,10 +103,11 @@ export async function addTransaction(tx: Omit<Transaction, 'id'>): Promise<Trans
   }
   global.__GLOBAL_TRANSACTIONS__.unshift(newTx);
 
-  if (isDbConfigured && sqlClient) {
+  const sql = getNeonSql();
+  if (sql) {
     try {
-      await ensureTableExists(sqlClient);
-      await sqlClient`
+      await ensureTableExists(sql);
+      await sql`
         INSERT INTO transactions (
           id, type, amount, currency, date, merchant, description, 
           category, subcategory, payment_method, source, confidence, 
@@ -124,10 +129,11 @@ export async function addTransaction(tx: Omit<Transaction, 'id'>): Promise<Trans
 }
 
 export async function deleteTransaction(id: string): Promise<boolean> {
-  if (isDbConfigured && sqlClient) {
+  const sql = getNeonSql();
+  if (sql) {
     try {
-      await ensureTableExists(sqlClient);
-      await sqlClient`DELETE FROM transactions WHERE id = ${id}`;
+      await ensureTableExists(sql);
+      await sql`DELETE FROM transactions WHERE id = ${id}`;
     } catch (err: any) {
       console.error('[Neon DB] Delete error:', err?.message);
     }
