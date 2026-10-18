@@ -1,6 +1,6 @@
 'use client';
 import { useApp } from '@/context/AppContext';
-import { Sun, Moon, LayoutDashboard, ListOrdered, PieChart, MessageSquare, Settings, Download } from 'lucide-react';
+import { Sun, Moon, LayoutDashboard, ListOrdered, PieChart, MessageSquare, Settings, Download, LogOut } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const NAV_ITEMS = [
@@ -17,7 +17,7 @@ interface SidebarProps {
 }
 
 export default function Sidebar({ activeTab, onTabChange }: SidebarProps) {
-  const { darkMode, setDarkMode, transactions, merchantRules, metrics, exportToCSV } = useApp();
+  const { darkMode, setDarkMode, transactions, merchantRules, metrics, exportToCSV, currentUser, logout } = useApp();
 
   return (
     <aside className={cn(
@@ -86,6 +86,26 @@ export default function Sidebar({ activeTab, onTabChange }: SidebarProps) {
             CSV
           </button>
         </div>
+
+        {currentUser && (
+          <div className={cn('p-2.5 rounded-xl border flex items-center justify-between gap-2 mt-2', darkMode ? 'bg-slate-900/60 border-slate-800' : 'bg-slate-50 border-slate-200')}>
+            <div className="flex items-center gap-2 min-w-0">
+              <div className="w-6 h-6 rounded-lg bg-emerald-500/20 text-emerald-400 font-bold text-xs flex items-center justify-center shrink-0 uppercase">
+                {currentUser.name?.[0] || currentUser.email[0]}
+              </div>
+              <div className="truncate text-[11px] font-medium leading-tight">
+                {currentUser.email}
+              </div>
+            </div>
+            <button
+              onClick={() => logout()}
+              title="Keluar / Logout"
+              className={cn('p-1 rounded-lg hover:text-rose-400 transition shrink-0', darkMode ? 'text-slate-500' : 'text-slate-400')}
+            >
+              <LogOut className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
       </div>
     </aside>
   );

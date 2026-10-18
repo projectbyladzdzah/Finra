@@ -20,6 +20,8 @@ import {
 interface AppContextType {
   // State
   darkMode: boolean;
+  currentUser: { id: string; email: string; name?: string } | null;
+  authLoading: boolean;
   transactions: Transaction[];
   categories: Category[];
   merchantRules: MerchantRule[];
@@ -37,6 +39,8 @@ interface AppContextType {
 
   // Actions
   setDarkMode: (v: boolean) => void;
+  setCurrentUser: (u: { id: string; email: string; name?: string } | null) => void;
+  logout: () => Promise<void>;
   setTransactions: (fn: (prev: Transaction[]) => Transaction[]) => void;
   setCategories: (fn: (prev: Category[]) => Category[]) => void;
   setMerchantRules: (fn: (prev: MerchantRule[]) => MerchantRule[]) => void;
@@ -62,6 +66,8 @@ const AppContext = createContext<AppContextType | null>(null);
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const [darkMode, setDarkMode] = useState(true);
+  const [currentUser, setCurrentUser] = useState<{ id: string; email: string; name?: string } | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
   const [botPlatform, setBotPlatform] = useState<'TELEGRAM' | 'WHATSAPP'>('TELEGRAM');
   const [isAccountLinked, setIsAccountLinked] = useState(true);
   const [autoSaveEnabled, setAutoSaveEnabled] = useState(false);
@@ -87,6 +93,38 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Check user session on initial load
+  useEffect(() => {
+    let isMounted = true;
+    const checkAuth = async () => {
+      try {
+        const res = await fetch('/api/auth/me');
+        if (res.ok) {
+          const data = await res.json();
+          if (data.authenticated && data.user && isMounted) {
+            setCurrentUser(data.user);
+          } else if (isMounted) {
+            setCurrentUser(null);
+          }
+        }
+      } catch {
+        if (isMounted) setCurrentUser(null);
+      } finally {
+        if (isMounted) setAuthLoading(false);
+      }
+    };
+    checkAuth();
+    return () => { isMounted = false; };
+  }, []);
+
+  const logout = useCallback(async () => {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+    } finally {
+      setCurrentUser(null);
+    }
+  }, []);
 
   // Sync transactions with backend store & auto-poll updates from WhatsApp webhook
   useEffect(() => {
@@ -401,7 +439,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   return (
     <AppContext.Provider value={{
-      darkMode, transactions, categories, merchantRules, budgets, messages, pipelineLogs,
+      darkMode, currentUser, authLoading, setCurrentUser, logout,
+      transactions, categories, merchantRules, budgets, messages, pipelineLogs,
       isBotProcessing, botPlatform, isAccountLinked, otpCode, autoSaveEnabled, autoSaveThreshold,
       metrics, editingTxModal,
       setDarkMode, setTransactions, setCategories, setMerchantRules, setBudgets,

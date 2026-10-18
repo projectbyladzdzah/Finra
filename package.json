@@ -12,11 +12,13 @@
     "@neon/config": "^1.9.2",
     "@neon/env": "^1.6.3",
     "@neondatabase/serverless": "^1.2.0",
+    "jose": "^6.2.12",
     "lucide-react": "^1.59.0",
     "next": "16.4.2",
     "react": "19.3.0",
     "react-dom": "19.3.0",
-    "recharts": "^3.10.1"
+    "recharts": "^3.10.1",
+    "resend": "^6.34.1"
   },
   "devDependencies": {
     "@tailwindcss/turbopack": "^4",
